@@ -1,0 +1,9 @@
+setup:
+    uv sync
+
+run:
+    uv run main.py
+
+clean:
+    rm -rf .venv
+    rm -rf __pycache__
