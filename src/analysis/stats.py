@@ -16,6 +16,7 @@ class SignalStats:
 
 def compute_stats(signal: np.ndarray) -> SignalStats:
     """Вычисление статистических параметров сигнала"""
+
     return SignalStats(
         total_power=np.sum(signal**2),
         mean_power=np.mean(signal**2),

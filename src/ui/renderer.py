@@ -44,6 +44,7 @@ class App:
             Button(530, 10, 120, 30, "Load WAV"),
             Button(660, 10, 120, 30, "Save WAV"),
             Button(790, 10, 120, 30, "Analyze"),
+            Button(920, 10, 120, 30, "Record"),
         ]
 
     def draw_graph(
@@ -116,6 +117,7 @@ class App:
         add_noise,
         read_wav,
         write_wav,
+        record_audio,
     ):
         rl.InitWindow(self.width, self.height, b"Signal Analyzer")
         rl.SetTargetFPS(60)
@@ -147,6 +149,10 @@ class App:
                 self.stats = compute_stats(self.signal)
                 self.acf = compute_acf(self.signal)
                 self.psd_f, self.psd_p = compute_psd(self.signal, self.fs)
+            elif self.buttons[7].clicked():
+                self.signal = record_audio(3.0)
+                self.fs = 44100
+                self.t = np.linspace(0, len(self.signal) / self.fs, len(self.signal))
 
             # Отрисовка
             rl.BeginDrawing()

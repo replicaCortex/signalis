@@ -7,7 +7,7 @@ sys.path.insert(0, "src")
 from analysis.mod import compute_acf, compute_psd, compute_stats
 from signals.mod import add_noise, gaussian_pulse, polyharmonic, sawtooth
 from ui.mod import App
-from wav.wav import read_wav, write_wav
+from wav.wav import read_wav, record_audio, write_wav
 
 
 def generate_signal(signal_type: str, t: np.ndarray) -> np.ndarray:
@@ -33,6 +33,7 @@ def main():
         add_noise=add_noise,
         read_wav=read_wav,
         write_wav=write_wav,
+        record_audio=record_audio,
     )
 
 

@@ -6,6 +6,5 @@ dependencies = [
     "raylib>=5.0.0.post1",
     "numpy>=1.26.0",
     "sounddevice>=0.4.6",
-    "scipy>=1.11.0"
+    "scipy>=1.11.0",
 ]
-

@@ -4,8 +4,8 @@
 
 ```
 src/
-├── main.py                 # Главный файл приложения
-├── analysis/               # Модуль анализа сигналов
+├── main.py                # Главный файл приложения
+├── analysis/              # Модуль анализа сигналов
 │   ├── mod.py             # Публичный интерфейс анализа
 │   ├── spectral.py        # Спектральный анализ (ACF, PSD)
 │   └── stats.py           # Статистические характеристики
@@ -30,7 +30,7 @@ src/
 ### Шаг 1: Клонирование репозитория
 
 ```bash
-git clone <url-репозитория>
+git clone https://github.com/replicaCortex/signalis
 cd signal-analyzer
 ```
 

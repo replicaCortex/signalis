@@ -2,6 +2,7 @@ import struct
 import wave
 
 import numpy as np
+import sounddevice as sd
 
 
 def read_wav(path: str) -> tuple[np.ndarray, int]:
@@ -26,6 +27,7 @@ def write_wav(path: str, signal: np.ndarray, fs: int = 44100):
 
 
 def record_audio(duration: float, fs: int = 44100) -> np.ndarray:
-    """Запись с микрофона (заглушка - raylib не поддерживает напрямую)"""
-    print(f"[Запись {duration}с не поддерживается в raylib]")
-    return np.zeros(int(duration * fs))
+    """Запись с микрофона"""
+    recording = sd.rec(int(duration * fs), samplerate=fs, channels=1)
+    sd.wait()
+    return recording.flatten()
