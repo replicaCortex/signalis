@@ -2,28 +2,12 @@
   pkgs ? import <nixpkgs> { },
 }:
 pkgs.mkShell {
-  nativeBuildInputs = [
-    pkgs.libGL
-
-    # X11 dependencies
-    pkgs.xorg.libX11
-    pkgs.xorg.libX11.dev
-    pkgs.xorg.libXcursor
-    pkgs.xorg.libXi
-    pkgs.xorg.libXinerama
-    pkgs.xorg.libXrandr
-
-    # Web support (uncomment to enable)
-    # pkgs.emscripten
+  nativeBuildInputs = with pkgs; [
+    uv
+    python312Packages.pyqt5
+    libsForQt5.qt5.qtwayland
   ];
 
-  # Audio dependencies
-  LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath [
-    pkgs.alsa-lib
-    pkgs.stdenv.cc.cc.lib.outPath
-    pkgs.zlib
-    pkgs.portaudio
-    pkgs.xorg.libX11
-    pkgs.libGL
-  ];
+  LD_LIBRARY_PATH = "$LD_LIBRARY_PATH:${pkgs.stdenv.cc.cc.lib.outPath}/lib:$LD_LIBRARY_PATH";
+
 }
