@@ -36,7 +36,6 @@ class ParamPanel(QGroupBox):
 
         layout = QVBoxLayout(self)
 
-        # --- Основные параметры ---
         self.ed_T = QLineEdit("1.0")
         self.ed_dt = QLineEdit("0.01")
         self.ed_N = QLineEdit("100")
@@ -47,12 +46,10 @@ class ParamPanel(QGroupBox):
         _add(layout, "Кол-во точек N:", self.ed_N)
         _add(layout, "Частота дискретизации Fd, Гц:", self.ed_fd)
 
-        # --- Тип сигнала ---
         self.signal_combo = QComboBox()
         self.signal_combo.addItems(SIGNAL_NAMES)
         _add(layout, "Тип сигнала:", self.signal_combo)
 
-        # --- Таблица гармоник ---
         self.harmonics_table = QTableWidget(1, 3)
         self.harmonics_table.setHorizontalHeaderLabels(
             ["Частота, Гц", "Амплитуда", "Фаза, °"]
@@ -65,7 +62,9 @@ class ParamPanel(QGroupBox):
         self.btn_clear = QPushButton("Очистить таблицу")
         layout.addWidget(self.btn_clear)
 
-        # --- Помеха ---
+        self.btn_add_row = QPushButton("Добавить строку")
+        layout.addWidget(self.btn_add_row)
+
         layout.addWidget(QLabel("— Помеха —"))
         self.cb_noise = QCheckBox("Добавить помеху")
         layout.addWidget(self.cb_noise)
@@ -78,7 +77,6 @@ class ParamPanel(QGroupBox):
         _add(layout, "Макс. амплитуда:", self.ed_amp_max)
         _add(layout, "Частота помехи, Гц:", self.ed_noise_freq)
 
-        # --- Фильтр ---
         layout.addWidget(QLabel("— Фильтр —"))
         self.filter_combo = QComboBox()
         self.filter_combo.addItems(FILTER_NAMES)
@@ -105,3 +103,7 @@ class ParamPanel(QGroupBox):
     @property
     def selected_filter(self) -> FilterType:
         return FilterType(self.filter_combo.currentIndex())
+
+    def add_row(self):
+        current_rows = self.harmonics_table.rowCount()
+        self.harmonics_table.insertRow(current_rows)

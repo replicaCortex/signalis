@@ -17,7 +17,7 @@ from widgets.plot_panel import PlotPanel
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Генератор и анализатор сигналов")
+        self.setWindowTitle("FooBarPrime")
         self.setGeometry(100, 100, 1200, 800)
 
         self.data = SignalData()
@@ -42,6 +42,7 @@ class MainWindow(QMainWindow):
         pp.btn_model.clicked.connect(self._on_model)
         pp.btn_clear.clicked.connect(pp.clear_table)
         pp.btn_filter.clicked.connect(self._on_filter)
+        pp.btn_add_row.clicked.connect(pp.add_row)
 
         for cb in [
             self.plot_panel.cb_base,

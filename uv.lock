@@ -7,7 +7,7 @@ resolution-markers = [
 ]
 
 [[package]]
-name = "1lab"
+name = "1-2lab"
 version = "6.6.6"
 source = { virtual = "." }
 dependencies = [

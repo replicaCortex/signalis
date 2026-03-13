@@ -138,8 +138,8 @@ def generate_signal(
 
     _, _, mag, phase_deg = compute_dft(data.combined)
 
-    if noise_params.enabled:
-        mag = mag**2 / n
+    # if noise_params.enabled:
+    #     mag = mag**2 / n
 
     data.spectrum_mag = mag
     data.spectrum_phase = phase_deg
