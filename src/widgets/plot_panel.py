@@ -43,12 +43,19 @@ class PlotPanel(QWidget):
         self.cb_base = QCheckBox("Базовый сигнал")
         self.cb_base.setChecked(True)
         self.cb_noise = QCheckBox("Помеха")
+        self.cb_colored_noise = QCheckBox("Цветной шум")
         self.cb_combined = QCheckBox("Результирующий")
         self.cb_combined.setChecked(True)
         self.cb_filtered = QCheckBox("Отфильтрованный")
 
         cb_layout = QHBoxLayout()
-        for cb in [self.cb_base, self.cb_noise, self.cb_combined, self.cb_filtered]:
+        for cb in [
+            self.cb_base,
+            self.cb_noise,
+            self.cb_colored_noise,
+            self.cb_combined,
+            self.cb_filtered,
+        ]:
             cb_layout.addWidget(cb)
         layout.addLayout(cb_layout)
 
@@ -89,6 +96,7 @@ class PlotPanel(QWidget):
         traces = [
             (self.cb_base, data.base, signal_label),
             (self.cb_noise, data.noise, "Помеха"),
+            (self.cb_colored_noise, data.colored_noise, "Цветной шум"),
             (self.cb_combined, data.combined, "Результирующий"),
             (self.cb_filtered, data.filtered, "Отфильтрованный"),
         ]

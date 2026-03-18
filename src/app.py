@@ -3,8 +3,10 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from dsp import (
+    NoiseType,
     SignalType,
     compute_dft,
+    generate_colored_noise,
     generate_gaussian,
     generate_harmonics,
     generate_noise,
@@ -55,6 +57,16 @@ class NoiseParams:
 
 
 @dataclass
+class ColoredNoiseEntry:
+    """Один слой цветного шума."""
+
+    noise_type: NoiseType = NoiseType.WHITE
+    amplitude: float = 1.0
+    seed: int = 42
+    enabled: bool = True
+
+
+@dataclass
 class FilterParams:
     filter_type: FilterType = FilterType.HANNING
     cutoff: float = 10.0
@@ -66,6 +78,7 @@ class SignalData:
     n: int = 0
     base: np.ndarray = field(default_factory=lambda: np.zeros(0))
     noise: np.ndarray = field(default_factory=lambda: np.zeros(0))
+    colored_noise: np.ndarray = field(default_factory=lambda: np.zeros(0))
     combined: np.ndarray = field(default_factory=lambda: np.zeros(0))
     filtered: np.ndarray = field(default_factory=lambda: np.zeros(0))
 
@@ -79,6 +92,7 @@ class SignalData:
         for attr in [
             "base",
             "noise",
+            "colored_noise",
             "combined",
             "filtered",
             "spectrum_mag",
@@ -95,7 +109,6 @@ def _build_base_signal(
     dt: float,
     harmonics: list[Harmonic],
 ) -> np.ndarray:
-    """Генерирует базовый сигнал выбранного типа."""
     freqs = [h.freq for h in harmonics]
     amps = [h.amp for h in harmonics]
     phases = [h.phase_rad for h in harmonics]
@@ -109,13 +122,27 @@ def _build_base_signal(
             return generate_sawtooth(n, dt, freqs, amps)
 
 
+def _build_colored_noise(
+    n: int,
+    noise_entries: list[ColoredNoiseEntry],
+) -> np.ndarray:
+    """Суммирует все включённые слои цветного шума."""
+    result = np.zeros(n)
+    for entry in noise_entries:
+        if entry.enabled:
+            result += generate_colored_noise(
+                entry.noise_type, n, entry.amplitude, entry.seed
+            )
+    return result
+
+
 def generate_signal(
     params: SignalParams,
     harmonics: list[Harmonic],
     noise_params: NoiseParams,
     signal_type: SignalType = SignalType.HARMONIC,
+    colored_noise_entries: list[ColoredNoiseEntry] | None = None,
 ) -> SignalData:
-    """Генерирует сигнал и вычисляет его спектр."""
     n = params.n_samples
     dt = params.dt
     data = SignalData()
@@ -123,6 +150,7 @@ def generate_signal(
 
     data.base = _build_base_signal(signal_type, n, dt, harmonics)
 
+    # Классическая помеха
     if noise_params.enabled and harmonics:
         data.noise = generate_noise(
             n,
@@ -132,15 +160,14 @@ def generate_signal(
             noise_params.amp_max,
             n_components=len(harmonics),
         )
-        data.combined = data.base + data.noise
-    else:
-        data.combined = data.base.copy()
+
+    # Цветные шумы
+    if colored_noise_entries:
+        data.colored_noise = _build_colored_noise(n, colored_noise_entries)
+
+    data.combined = data.base + data.noise + data.colored_noise
 
     _, _, mag, phase_deg = compute_dft(data.combined)
-
-    # if noise_params.enabled:
-    #     mag = mag**2 / n
-
     data.spectrum_mag = mag
     data.spectrum_phase = phase_deg
 
@@ -153,7 +180,6 @@ def apply_filter_to_data(
     sample_rate: float,
     noise_enabled: bool,
 ) -> SignalData:
-    """Применяет фильтр и пересчитывает спектры."""
     n = data.n
     ft = filter_params.filter_type
     r = filter_params.r
