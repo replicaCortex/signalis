@@ -1,9 +1,12 @@
+# src/widgets/plot_panel.py
 import numpy as np
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 from PyQt5.QtWidgets import (
     QCheckBox,
+    QComboBox,
     QHBoxLayout,
+    QLabel,
     QTabWidget,
     QVBoxLayout,
     QWidget,
@@ -31,8 +34,82 @@ class PlotTab(QWidget):
         self.canvas.draw()
 
 
+class SpectrumTab(QWidget):
+    """Вкладка с переключением DFT / FFT."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.figure = Figure(tight_layout=True)
+        self.canvas = FigureCanvas(self.figure)
+        self.ax = self.figure.add_subplot(111)
+
+        layout = QVBoxLayout(self)
+
+        selector_layout = QHBoxLayout()
+        selector_layout.addWidget(QLabel("Метод:"))
+        self.combo = QComboBox()
+        self.combo.addItems(["DFT", "FFT"])
+        selector_layout.addWidget(self.combo)
+        selector_layout.addStretch()
+        layout.addLayout(selector_layout)
+
+        layout.addWidget(self.canvas)
+
+    def clear(self):
+        self.ax.clear()
+
+    def refresh(self):
+        self.canvas.draw()
+
+    @property
+    def is_fft(self) -> bool:
+        return self.combo.currentIndex() == 1
+
+
+class PhasePsdTab(QWidget):
+    """Вкладка с переключением Фазовый спектр / СПМ."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.figure = Figure(tight_layout=True)
+        self.canvas = FigureCanvas(self.figure)
+        self.ax = self.figure.add_subplot(111)
+
+        layout = QVBoxLayout(self)
+
+        selector_layout = QHBoxLayout()
+        selector_layout.addWidget(QLabel("Отображение:"))
+        self.combo = QComboBox()
+        self.combo.addItems(["Фазовый спектр", "СПМ"])
+        selector_layout.addWidget(self.combo)
+        selector_layout.addStretch()
+        layout.addLayout(selector_layout)
+
+        layout.addWidget(self.canvas)
+
+    def clear(self):
+        self.ax.clear()
+
+    def refresh(self):
+        self.canvas.draw()
+
+    @property
+    def is_psd(self) -> bool:
+        return self.combo.currentIndex() == 1
+
+
+# Цвета для типов сегментов
+SEGMENT_COLORS = {
+    "Гарм": "#1f77b4",
+    "Гаусс": "#ff7f0e",
+    "Пила": "#2ca02c",
+    "Импульс": "#d62728",
+    "Эксп": "#9467bd",
+}
+
+
 class PlotPanel(QWidget):
-    """4 вкладки графиков + чекбоксы."""
+    """Вкладки графиков + чекбоксы."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -63,16 +140,125 @@ class PlotPanel(QWidget):
         self.tabs = QTabWidget()
 
         self.tab_signals = PlotTab()
-        self.tab_amplitude = PlotTab()
-        self.tab_phase = PlotTab()
+        self.tab_spectrum = SpectrumTab()
+        self.tab_phase_psd = PhasePsdTab()
+        self.tab_acf = PlotTab()
         self.tab_freq_resp = PlotTab()
 
         self.tabs.addTab(self.tab_signals, "Сигналы")
-        self.tabs.addTab(self.tab_amplitude, "Амплитудный спектр")
-        self.tabs.addTab(self.tab_phase, "Фазовый спектр")
+        self.tabs.addTab(self.tab_spectrum, "Амплитудный спектр")
+        self.tabs.addTab(self.tab_phase_psd, "Фаза / СПМ")
+        self.tabs.addTab(self.tab_acf, "АКФ")
         self.tabs.addTab(self.tab_freq_resp, "АЧХ фильтра")
 
         layout.addWidget(self.tabs)
+
+        # Подключаем переключатели к перерисовке
+        self.tab_spectrum.combo.currentIndexChanged.connect(self._on_spectrum_switch)
+        self.tab_phase_psd.combo.currentIndexChanged.connect(self._on_phase_psd_switch)
+
+        # Храним последние данные для перерисовки
+        self._last_params = None
+        self._last_data = None
+        self._last_show_filter = False
+        self._last_label = "Базовый"
+
+    def _on_spectrum_switch(self):
+        if self._last_data is not None:
+            self._draw_spectrum()
+
+    def _on_phase_psd_switch(self):
+        if self._last_data is not None:
+            self._draw_phase_psd()
+
+    def _draw_spectrum(self):
+        params = self._last_params
+        data = self._last_data
+        show_filter = self._last_show_filter
+
+        n = data.n
+        freq = np.arange(n) * params.df
+        bar_w = 0.8 * params.df
+
+        ax = self.tab_spectrum.ax
+        ax.clear()
+
+        if self.tab_spectrum.is_fft:
+            if len(data.fft_mag) == n:
+                half_n = n // 2
+                ax.bar(freq[:half_n], data.fft_mag[:half_n], width=bar_w, label="FFT")
+            ax.set(xlabel="Частота, Гц", ylabel="Амплитуда (FFT)")
+        else:
+            if len(data.spectrum_mag) == n:
+                ax.bar(freq, data.spectrum_mag, width=bar_w, label="DFT")
+            if show_filter and len(data.filtered_spectrum_mag) == n:
+                ax.bar(
+                    freq,
+                    data.filtered_spectrum_mag,
+                    width=bar_w * 0.5,
+                    label="Отфильтрованный",
+                )
+            ax.set(xlabel="Частота, Гц", ylabel="Амплитуда (DFT)")
+
+        ax.legend()
+        ax.grid(True)
+        self.tab_spectrum.refresh()
+
+    def _draw_phase_psd(self):
+        params = self._last_params
+        data = self._last_data
+
+        n = data.n
+        freq = np.arange(n) * params.df
+        bar_w = 0.8 * params.df
+
+        ax = self.tab_phase_psd.ax
+        ax.clear()
+
+        if self.tab_phase_psd.is_psd:
+            if len(data.psd) == n:
+                half_n = n // 2
+                ax.semilogy(freq[:half_n], data.psd[:half_n], label="СПМ")
+            ax.set(xlabel="Частота, Гц", ylabel="СПМ (лог. шкала)")
+        else:
+            if data.has_noise and len(data.phase_psd) == n:
+                ax.bar(freq, data.phase_psd, width=bar_w, label="СПМ фазы")
+                ax.set(xlabel="Частота, Гц", ylabel="СПМ фазы")
+            elif len(data.spectrum_phase) == n:
+                ax.bar(freq, data.spectrum_phase, width=bar_w, label="Фаза")
+                ax.set(xlabel="Частота, Гц", ylabel="Фаза, °")
+
+        ax.legend()
+        ax.grid(True)
+        self.tab_phase_psd.refresh()
+
+    def _draw_segment_boundaries(self, ax, data, params):
+        """Рисует границы и метки сегментов на графике сигнала."""
+        if not data.segment_boundaries:
+            return
+
+        dt = params.dt
+        y_min, y_max = ax.get_ylim()
+        drawn_labels = set()
+
+        for (start, end), label in zip(data.segment_boundaries, data.segment_labels):
+            t_start = start * dt
+            t_end = end * dt
+            color = SEGMENT_COLORS.get(label, "#999999")
+
+            # Полупрозрачная заливка
+            show_label = label not in drawn_labels
+            ax.axvspan(
+                t_start,
+                t_end,
+                alpha=0.12,
+                color=color,
+                label=f"Сегмент: {label}" if show_label else None,
+            )
+            drawn_labels.add(label)
+
+            # Вертикальные линии границ
+            ax.axvline(t_start, color=color, linestyle="--", linewidth=0.5, alpha=0.5)
 
     def update_plots(
         self,
@@ -84,6 +270,11 @@ class PlotPanel(QWidget):
         n = data.n
         if n == 0:
             return
+
+        self._last_params = params
+        self._last_data = data
+        self._last_show_filter = show_filter
+        self._last_label = signal_label
 
         time = np.arange(n) * params.dt
         freq = np.arange(n) * params.df
@@ -104,36 +295,30 @@ class PlotPanel(QWidget):
             if cb.isChecked() and len(sig) == n:
                 ax.plot(time, sig, label=label)
 
+        # Рисуем границы сегментов
+        self._draw_segment_boundaries(ax, data, params)
+
         ax.set(xlabel="Время, с", ylabel="Амплитуда")
-        ax.legend()
+        ax.legend(fontsize=7, loc="upper right")
         ax.grid(True)
         self.tab_signals.refresh()
 
         # --- Амплитудный спектр ---
-        ax = self.tab_amplitude.ax
+        self._draw_spectrum()
+
+        # --- Фаза / СПМ ---
+        self._draw_phase_psd()
+
+        # --- АКФ ---
+        ax = self.tab_acf.ax
         ax.clear()
-        if len(data.spectrum_mag) == n:
-            ax.bar(freq, data.spectrum_mag, width=bar_w, label="Исходный")
-        if show_filter and len(data.filtered_spectrum_mag) == n:
-            ax.bar(
-                freq,
-                data.filtered_spectrum_mag,
-                width=bar_w * 0.5,
-                label="Отфильтрованный",
-            )
-        ax.set(xlabel="Частота, Гц", ylabel="Амплитуда")
+        if len(data.acf) == n:
+            lags = np.arange(n) * params.dt
+            ax.plot(lags, data.acf, label="АКФ")
+        ax.set(xlabel="Лаг, с", ylabel="АКФ")
         ax.legend()
         ax.grid(True)
-        self.tab_amplitude.refresh()
-
-        # --- Фазовый спектр ---
-        ax = self.tab_phase.ax
-        ax.clear()
-        if len(data.spectrum_phase) == n:
-            ax.bar(freq, data.spectrum_phase, width=bar_w)
-        ax.set(xlabel="Частота, Гц", ylabel="Фаза, °")
-        ax.grid(True)
-        self.tab_phase.refresh()
+        self.tab_acf.refresh()
 
         # --- АЧХ ---
         ax = self.tab_freq_resp.ax

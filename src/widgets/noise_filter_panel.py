@@ -1,3 +1,4 @@
+# src/widgets/noise_filter_panel.py
 from PyQt5.QtCore import pyqtSignal
 from PyQt5.QtWidgets import (
     QCheckBox,
@@ -9,7 +10,6 @@ from PyQt5.QtWidgets import (
     QLineEdit,
     QPushButton,
     QScrollArea,
-    QSpinBox,
     QVBoxLayout,
     QWidget,
 )
@@ -55,7 +55,6 @@ class NoiseLayerWidget(QGroupBox):
         # Включение
         self.cb_enabled = QCheckBox("Включён")
         self.cb_enabled.setChecked(True)
-        self.cb_enabled.stateChanged.connect(self.changed)
         layout.addWidget(self.cb_enabled)
 
         # Тип шума
@@ -63,7 +62,6 @@ class NoiseLayerWidget(QGroupBox):
         row1.addWidget(QLabel("Тип:"))
         self.combo_type = QComboBox()
         self.combo_type.addItems(NOISE_TYPE_NAMES)
-        self.combo_type.currentIndexChanged.connect(self.changed)
         row1.addWidget(self.combo_type)
         layout.addLayout(row1)
 
@@ -75,19 +73,8 @@ class NoiseLayerWidget(QGroupBox):
         self.spin_amplitude.setValue(1.0)
         self.spin_amplitude.setDecimals(3)
         self.spin_amplitude.setSingleStep(0.1)
-        self.spin_amplitude.valueChanged.connect(self.changed)
         row2.addWidget(self.spin_amplitude)
         layout.addLayout(row2)
-
-        # Seed
-        row3 = QHBoxLayout()
-        row3.addWidget(QLabel("Seed:"))
-        self.spin_seed = QSpinBox()
-        self.spin_seed.setRange(0, 999999)
-        self.spin_seed.setValue(42)
-        self.spin_seed.valueChanged.connect(self.changed)
-        row3.addWidget(self.spin_seed)
-        layout.addLayout(row3)
 
         # Кнопка удаления
         self.btn_remove = QPushButton("✕ Удалить")
@@ -98,7 +85,6 @@ class NoiseLayerWidget(QGroupBox):
         return ColoredNoiseEntry(
             noise_type=NoiseType(self.combo_type.currentIndex()),
             amplitude=self.spin_amplitude.value(),
-            seed=self.spin_seed.value(),
             enabled=self.cb_enabled.isChecked(),
         )
 
@@ -110,8 +96,8 @@ class NoiseLayerWidget(QGroupBox):
 class NoiseFilterPanel(QGroupBox):
     """Панель настройки цветных шумов и фильтров (левая вкладка)."""
 
-    noise_changed = pyqtSignal()
     filter_requested = pyqtSignal()
+    model_requested = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__("Шумы и фильтры", parent)
@@ -151,6 +137,11 @@ class NoiseFilterPanel(QGroupBox):
 
         main_layout.addWidget(noise_group)
 
+        # ── Кнопка моделировать ──
+        self.btn_model = QPushButton("Моделировать")
+        self.btn_model.clicked.connect(self.model_requested)
+        main_layout.addWidget(self.btn_model)
+
         # ── Секция фильтров ──
         filter_group = QGroupBox("Фильтр")
         filter_layout = QVBoxLayout(filter_group)
@@ -185,12 +176,10 @@ class NoiseFilterPanel(QGroupBox):
         layer = NoiseLayerWidget(index=idx)
         layer.combo_type.setCurrentIndex(noise_type_idx)
         layer.removed.connect(self._remove_noise_layer)
-        layer.changed.connect(self.noise_changed)
 
         self._noise_layers.append(layer)
         # Вставляем перед stretch
         self._noise_list_layout.insertWidget(self._noise_list_layout.count() - 1, layer)
-        self.noise_changed.emit()
         return layer
 
     def _remove_noise_layer(self, layer: NoiseLayerWidget):
@@ -199,14 +188,12 @@ class NoiseFilterPanel(QGroupBox):
             self._noise_list_layout.removeWidget(layer)
             layer.deleteLater()
             self._reindex()
-            self.noise_changed.emit()
 
     def _clear_all_noise(self):
         for layer in list(self._noise_layers):
             self._noise_list_layout.removeWidget(layer)
             layer.deleteLater()
         self._noise_layers.clear()
-        self.noise_changed.emit()
 
     def _add_all_noise_types(self):
         """Добавляет по одному слою каждого типа шума."""

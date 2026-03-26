@@ -1,3 +1,4 @@
+# src/dsp.py
 from enum import IntEnum
 
 import numpy as np
@@ -7,6 +8,8 @@ class SignalType(IntEnum):
     HARMONIC = 0
     GAUSSIAN = 1
     SAWTOOTH = 2
+    IMPULSE = 3
+    EXPONENTIAL_IMPULSE = 4
 
 
 class NoiseType(IntEnum):
@@ -35,20 +38,23 @@ def generate_harmonics(
 def generate_gaussian(
     n: int,
     dt: float,
-    freqs: list[float],
+    centers: list[float],
     amps: list[float],
+    sigmas: list[float],
 ) -> np.ndarray:
+    """
+    Гауссов импульс.
+    centers — центр импульса (в секундах),
+    sigmas — ширина (сигма) импульса (в секундах).
+    """
     t = np.arange(n) * dt
-    if not freqs:
+    if not centers:
         return np.zeros(n)
-    t0 = t[-1] / 2
     result = np.zeros(n)
-    for f, a in zip(freqs, amps):
-        if f == 0:
-            result += a
-            continue
-        sigma = 1.0 / (2 * np.pi * f)
-        result += a * np.exp(-((t - t0) ** 2) / (2 * sigma**2))
+    for c, a, s in zip(centers, amps, sigmas):
+        if s <= 0:
+            s = 0.001
+        result += a * np.exp(-((t - c) ** 2) / (2 * s**2))
     return result
 
 
@@ -72,6 +78,54 @@ def generate_sawtooth(
     return result
 
 
+def generate_impulse(
+    n: int,
+    dt: float,
+    widths: list[float],
+    amps: list[float],
+    periods: list[float],  # Переименовали distances в periods
+) -> np.ndarray:
+    """
+    Периодическая последовательность прямоугольных импульсов.
+    widths - длительность импульса (с)
+    periods - период повторения (с). Если <= 0, то одиночный импульс.
+    """
+    t = np.arange(n) * dt
+    result = np.zeros(n)
+    for w, a, period in zip(widths, amps, periods):
+        if period <= 0:
+            # Одиночный импульс от t=0 до t=w
+            mask = (t >= 0) & (t <= w)
+            result[mask] += a
+        else:
+            # Периодические импульсы (остаток от деления времени на период)
+            # Если время внутри периода меньше длительности импульса - сигнал включен
+            mask = (t % period) <= w
+            result[mask] += a
+    return result
+
+
+def generate_exponential_impulse(
+    n: int,
+    dt: float,
+    alphas: list[float],
+    amps: list[float],
+    delays: list[float],  # Добавили задержку
+) -> np.ndarray:
+    """
+    Экспоненциальный импульс: A * exp(alpha * (t - delay)) для t >= delay.
+    alpha < 0 - затухание, alpha > 0 - нарастание.
+    """
+    t = np.arange(n) * dt
+    result = np.zeros(n)
+    for alpha, a, delay in zip(alphas, amps, delays):
+        # Включаем сигнал только после времени delay
+        mask = t >= delay
+        # Считаем экспоненту только для нужных точек (чтобы не было переполнения)
+        result[mask] += a * np.exp(alpha * (t[mask] - delay))
+    return result
+
+
 def generate_noise(
     n: int,
     dt: float,
@@ -79,9 +133,8 @@ def generate_noise(
     amp_min: int,
     amp_max: int,
     n_components: int,
-    seed: int = 42,
 ) -> np.ndarray:
-    rng = np.random.default_rng(seed)
+    rng = np.random.default_rng()
     t = np.arange(n) * dt
     angle = 2 * np.pi * freq * t
     result = np.zeros(n)
@@ -97,56 +150,34 @@ def generate_noise(
 def generate_uniform_noise(
     n: int,
     amplitude: float = 1.0,
-    seed: int = 42,
 ) -> np.ndarray:
-    """
-    Равномерный шум.
-    Значения распределены равномерно в диапазоне [-amplitude, +amplitude].
-    """
-    rng = np.random.default_rng(seed)
+    rng = np.random.default_rng()
     return amplitude * (2.0 * rng.random(n) - 1.0)
 
 
 def generate_white_noise(
     n: int,
     amplitude: float = 1.0,
-    seed: int = 42,
 ) -> np.ndarray:
-    """
-    Белый шум (гауссовский).
-    Спектральная плотность мощности постоянна на всех частотах.
-    PSD(f) = const
-    """
-    rng = np.random.default_rng(seed)
+    rng = np.random.default_rng()
     return amplitude * rng.standard_normal(n)
 
 
 def generate_pink_noise(
     n: int,
     amplitude: float = 1.0,
-    seed: int = 42,
 ) -> np.ndarray:
-    """
-    Розовый шум (1/f шум).
-    Спектральная плотность мощности обратно пропорциональна частоте:
-    PSD(f) ∝ 1/f
-
-    Метод: генерируем белый шум в частотной области,
-    умножаем амплитуду на 1/sqrt(f), затем ОБПФ.
-    """
-    rng = np.random.default_rng(seed)
+    rng = np.random.default_rng()
     white = rng.standard_normal(n)
 
     spectrum = np.fft.rfft(white)
     freqs = np.fft.rfftfreq(n)
 
-    # Избегаем деления на ноль для нулевой частоты
     freqs[0] = 1.0
     spectrum *= 1.0 / np.sqrt(freqs)
-    spectrum[0] = 0.0  # убираем DC-компоненту
+    spectrum[0] = 0.0
 
     result = np.fft.irfft(spectrum, n=n)
-    # Нормализация
     if np.max(np.abs(result)) > 0:
         result = result / np.max(np.abs(result)) * amplitude
     return result
@@ -155,20 +186,11 @@ def generate_pink_noise(
 def generate_brown_noise(
     n: int,
     amplitude: float = 1.0,
-    seed: int = 42,
 ) -> np.ndarray:
-    """
-    Красный (броуновский) шум (1/f² шум).
-    Спектральная плотность мощности:
-    PSD(f) ∝ 1/f²
-
-    Метод: кумулятивная сумма белого шума (случайное блуждание).
-    """
-    rng = np.random.default_rng(seed)
+    rng = np.random.default_rng()
     white = rng.standard_normal(n)
     result = np.cumsum(white)
 
-    # Удаляем линейный тренд
     result -= np.linspace(result[0], result[-1], n)
 
     if np.max(np.abs(result)) > 0:
@@ -179,17 +201,8 @@ def generate_brown_noise(
 def generate_blue_noise(
     n: int,
     amplitude: float = 1.0,
-    seed: int = 42,
 ) -> np.ndarray:
-    """
-    Синий шум (f шум).
-    Спектральная плотность мощности пропорциональна частоте:
-    PSD(f) ∝ f
-
-    Метод: генерируем белый шум в частотной области,
-    умножаем амплитуду на sqrt(f), затем ОБПФ.
-    """
-    rng = np.random.default_rng(seed)
+    rng = np.random.default_rng()
     white = rng.standard_normal(n)
 
     spectrum = np.fft.rfft(white)
@@ -207,16 +220,8 @@ def generate_blue_noise(
 def generate_violet_noise(
     n: int,
     amplitude: float = 1.0,
-    seed: int = 42,
 ) -> np.ndarray:
-    """
-    Фиолетовый шум (f² шум).
-    Спектральная плотность мощности:
-    PSD(f) ∝ f²
-
-    Метод: дифференцирование белого шума (конечные разности).
-    """
-    rng = np.random.default_rng(seed)
+    rng = np.random.default_rng()
     white = rng.standard_normal(n)
     result = np.diff(white, prepend=0.0)
 
@@ -229,9 +234,7 @@ def generate_colored_noise(
     noise_type: NoiseType,
     n: int,
     amplitude: float = 1.0,
-    seed: int = 42,
 ) -> np.ndarray:
-    """Диспетчер генерации цветного шума."""
     generators = {
         NoiseType.UNIFORM: generate_uniform_noise,
         NoiseType.WHITE: generate_white_noise,
@@ -241,7 +244,7 @@ def generate_colored_noise(
         NoiseType.VIOLET: generate_violet_noise,
     }
     gen = generators[noise_type]
-    return gen(n, amplitude, seed)
+    return gen(n, amplitude)
 
 
 def compute_dft(
@@ -268,3 +271,54 @@ def compute_dft(
     phase_deg = np.degrees(phase_rad)
 
     return rl, im, magnitude, phase_deg
+
+
+def compute_fft(
+    signal: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Быстрое преобразование Фурье.
+    Возвращает: (magnitude, phase_deg, complex_spectrum)
+    """
+    n = len(signal)
+    spectrum = np.fft.fft(signal)
+
+    # Нормировка
+    magnitude = np.abs(spectrum) * 2.0 / n
+    magnitude[0] /= 2.0  # DC компонента
+
+    # Фаза в градусах
+    phase_rad = np.angle(spectrum)
+    phase_deg = np.degrees(phase_rad)
+
+    return magnitude, phase_deg, spectrum
+
+
+def compute_psd(
+    signal: np.ndarray,
+    dt: float,
+) -> np.ndarray:
+    """
+    Спектральная плотность мощности (СПМ).
+    """
+    n = len(signal)
+    spectrum = np.fft.fft(signal)
+    psd = (np.abs(spectrum) ** 2) / (n * dt)
+    return psd
+
+
+def compute_acf(
+    signal: np.ndarray,
+) -> np.ndarray:
+    """
+    Автокорреляционная функция (АКФ).
+    """
+    n = len(signal)
+    mean = np.mean(signal)
+    signal_centered = signal - mean
+
+    acf = np.correlate(signal_centered, signal_centered, mode="full")
+    acf = acf[n - 1 :]  # Берём только положительные лаги
+    acf = acf / acf[0] if acf[0] != 0 else acf  # Нормировка
+
+    return acf
