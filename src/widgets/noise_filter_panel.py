@@ -25,6 +25,7 @@ NOISE_TYPE_NAMES = [
     "Красный / Броуновский (1/f²)",
     "Синий (f)",
     "Фиолетовый (f²)",
+    "Экспоненциальный",
 ]
 
 FILTER_NAMES = [
@@ -94,7 +95,7 @@ class NoiseLayerWidget(QGroupBox):
 
 
 class NoiseFilterPanel(QGroupBox):
-    """Панель настройки цветных шумов и фильтров (левая вкладка)."""
+    """Панель настройки цветных шумов и фильтров."""
 
     filter_requested = pyqtSignal()
     model_requested = pyqtSignal()
@@ -108,10 +109,9 @@ class NoiseFilterPanel(QGroupBox):
         main_layout = QVBoxLayout(self)
 
         # ── Секция шумов ──
-        noise_group = QGroupBox("Цветные шумы")
+        noise_group = QGroupBox("Шумы")
         noise_outer = QVBoxLayout(noise_group)
 
-        # Прокручиваемая область для слоёв шума
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll_widget = QWidget()
@@ -120,7 +120,6 @@ class NoiseFilterPanel(QGroupBox):
         scroll.setWidget(scroll_widget)
         noise_outer.addWidget(scroll)
 
-        # Кнопки быстрого добавления
         btn_row = QHBoxLayout()
         self.btn_add_noise = QPushButton("+ Добавить шум")
         self.btn_add_noise.clicked.connect(self._add_noise_layer)
@@ -169,8 +168,6 @@ class NoiseFilterPanel(QGroupBox):
 
         main_layout.addWidget(filter_group)
 
-    # ── Управление слоями шума ──
-
     def _add_noise_layer(self, noise_type_idx: int = 0) -> NoiseLayerWidget:
         idx = len(self._noise_layers)
         layer = NoiseLayerWidget(index=idx)
@@ -178,7 +175,6 @@ class NoiseFilterPanel(QGroupBox):
         layer.removed.connect(self._remove_noise_layer)
 
         self._noise_layers.append(layer)
-        # Вставляем перед stretch
         self._noise_list_layout.insertWidget(self._noise_list_layout.count() - 1, layer)
         return layer
 
@@ -196,15 +192,12 @@ class NoiseFilterPanel(QGroupBox):
         self._noise_layers.clear()
 
     def _add_all_noise_types(self):
-        """Добавляет по одному слою каждого типа шума."""
         for i in range(len(NOISE_TYPE_NAMES)):
             self._add_noise_layer(noise_type_idx=i)
 
     def _reindex(self):
         for i, layer in enumerate(self._noise_layers):
             layer.set_index(i)
-
-    # ── Публичный API ──
 
     def get_noise_entries(self) -> list[ColoredNoiseEntry]:
         return [layer.to_entry() for layer in self._noise_layers]

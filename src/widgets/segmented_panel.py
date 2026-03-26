@@ -4,9 +4,11 @@ from PyQt5.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDoubleSpinBox,
+    QFileDialog,
     QGroupBox,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QPushButton,
     QScrollArea,
     QVBoxLayout,
@@ -15,6 +17,7 @@ from PyQt5.QtWidgets import (
 
 from app import SegmentPoolEntry
 from dsp import SignalType
+from widgets.simulation_panel import CollapsibleSimulationWidget
 
 SEGMENT_TYPE_NAMES = [
     "Гармонический",
@@ -22,6 +25,7 @@ SEGMENT_TYPE_NAMES = [
     "Пилообразный",
     "Импульсный",
     "Экспоненциальный",
+    "Речевой сигнал",
 ]
 
 SEGMENT_TYPE_MAP = {
@@ -30,6 +34,7 @@ SEGMENT_TYPE_MAP = {
     2: SignalType.SAWTOOTH,
     3: SignalType.IMPULSE,
     4: SignalType.EXPONENTIAL_IMPULSE,
+    5: SignalType.SPEECH,
 }
 
 
@@ -89,7 +94,8 @@ class SegmentEntryWidget(QGroupBox):
         hg_layout.addLayout(row_amp)
 
         row_phase = QHBoxLayout()
-        row_phase.addWidget(QLabel("Фаза, °:"))
+        self.lbl_phase = QLabel("Фаза, °:")
+        row_phase.addWidget(self.lbl_phase)
         self.spin_phase = QDoubleSpinBox()
         self.spin_phase.setRange(-360.0, 360.0)
         self.spin_phase.setValue(0.0)
@@ -188,6 +194,39 @@ class SegmentEntryWidget(QGroupBox):
 
         layout.addWidget(self.exp_group)
 
+        # === Параметры для речевого сигнала ===
+        self.speech_group = QWidget()
+        sg_layout = QVBoxLayout(self.speech_group)
+        sg_layout.setContentsMargins(0, 0, 0, 0)
+
+        row_file = QHBoxLayout()
+        row_file.addWidget(QLabel("WAV файл:"))
+        self.ed_speech_file = QLineEdit()
+        self.ed_speech_file.setPlaceholderText("Выберите файл...")
+        self.ed_speech_file.setReadOnly(True)
+        row_file.addWidget(self.ed_speech_file)
+        self.btn_browse = QPushButton("📂")
+        self.btn_browse.setFixedWidth(36)
+        self.btn_browse.clicked.connect(self._browse_wav)
+        row_file.addWidget(self.btn_browse)
+        sg_layout.addLayout(row_file)
+
+        row_sa = QHBoxLayout()
+        row_sa.addWidget(QLabel("Амплитуда:"))
+        self.spin_speech_amp = QDoubleSpinBox()
+        self.spin_speech_amp.setRange(0.001, 10000.0)
+        self.spin_speech_amp.setValue(1.0)
+        self.spin_speech_amp.setDecimals(3)
+        self.spin_speech_amp.setSingleStep(0.1)
+        row_sa.addWidget(self.spin_speech_amp)
+        sg_layout.addLayout(row_sa)
+
+        self.lbl_file_info = QLabel("")
+        self.lbl_file_info.setStyleSheet("color: #888; font-size: 10px;")
+        sg_layout.addWidget(self.lbl_file_info)
+
+        layout.addWidget(self.speech_group)
+
         # Метка минимальной длительности
         self.lbl_min_duration = QLabel("Мин. длительность: —")
         self.lbl_min_duration.setStyleSheet("color: #666; font-style: italic;")
@@ -210,25 +249,52 @@ class SegmentEntryWidget(QGroupBox):
             self.spin_imp_period,
             self.spin_exp_alpha,
             self.spin_exp_amp,
+            self.spin_speech_amp,
         ]:
             spin.valueChanged.connect(self._update_min_duration_label)
+
+    def _browse_wav(self):
+        """Открывает диалог выбора WAV файла."""
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Выберите WAV файл", "", "WAV файлы (*.wav);;Все файлы (*.*)"
+        )
+        if path:
+            self.ed_speech_file.setText(path)
+            self._show_wav_info(path)
+            self.changed.emit()
+
+    def _show_wav_info(self, path: str):
+        """Показывает информацию о WAV файле."""
+        import wave
+
+        try:
+            with wave.open(path, "rb") as wf:
+                ch = wf.getnchannels()
+                sr = wf.getframerate()
+                n = wf.getnframes()
+                dur = n / sr
+                self.lbl_file_info.setText(
+                    f"Каналы: {ch} | Частота: {sr} Гц | "
+                    f"Длительность: {dur:.2f} с | Сэмплы: {n}"
+                )
+        except Exception as e:
+            self.lbl_file_info.setText(f"Ошибка: {e}")
 
     def _on_type_changed(self, index: int):
         """Показываем/скрываем группы параметров."""
         sig_type = SEGMENT_TYPE_MAP.get(index, SignalType.HARMONIC)
 
-        self.harmonic_group.setVisible(
-            sig_type in (SignalType.HARMONIC, SignalType.SAWTOOTH)
-        )
-        # Скрываем фазу для пилообразного
-        if sig_type == SignalType.SAWTOOTH:
-            self.spin_phase.setVisible(False)
-        else:
-            self.spin_phase.setVisible(True)
+        is_harmonic_like = sig_type in (SignalType.HARMONIC, SignalType.SAWTOOTH)
+        self.harmonic_group.setVisible(is_harmonic_like)
+
+        is_harmonic = sig_type == SignalType.HARMONIC
+        self.spin_phase.setVisible(is_harmonic)
+        self.lbl_phase.setVisible(is_harmonic)
 
         self.gauss_group.setVisible(sig_type == SignalType.GAUSSIAN)
         self.impulse_group.setVisible(sig_type == SignalType.IMPULSE)
         self.exp_group.setVisible(sig_type == SignalType.EXPONENTIAL_IMPULSE)
+        self.speech_group.setVisible(sig_type == SignalType.SPEECH)
 
         self._update_min_duration_label()
         self.changed.emit()
@@ -255,6 +321,8 @@ class SegmentEntryWidget(QGroupBox):
             impulse_period=self.spin_imp_period.value(),
             exp_alpha=self.spin_exp_alpha.value(),
             exp_amp=self.spin_exp_amp.value(),
+            speech_file=self.ed_speech_file.text(),
+            speech_amp=self.spin_speech_amp.value(),
         )
 
     def set_index(self, idx: int):
@@ -263,21 +331,38 @@ class SegmentEntryWidget(QGroupBox):
 
 
 class SegmentedPanel(QGroupBox):
-    """Панель настройки сегментированного сигнала (левая вкладка)."""
+    """Панель настройки сигнала с встроенными параметрами симуляции."""
 
     generate_requested = pyqtSignal()
 
     def __init__(self, parent=None):
-        super().__init__("Сегментированный сигнал", parent)
+        super().__init__("Сигнал", parent)
         self._entries: list[SegmentEntryWidget] = []
         self._build_ui()
 
     def _build_ui(self):
         main_layout = QVBoxLayout(self)
 
-        # ── Настройки сегментации ──
-        seg_settings = QGroupBox("Настройки сегментов")
-        seg_layout = QVBoxLayout(seg_settings)
+        # ── Параметры симуляции (сворачиваемый блок) ──
+        self.sim_widget = CollapsibleSimulationWidget()
+        main_layout.addWidget(self.sim_widget)
+
+        # ── Режим заполнения ──
+        mode_group = QGroupBox("Режим генерации")
+        mode_layout = QVBoxLayout(mode_group)
+
+        self.cb_single_type = QCheckBox("Заполнить одним типом сигнала")
+        self.cb_single_type.setToolTip(
+            "Первый включённый сигнал из пула заполнит\n"
+            "весь временной интервал без сегментации."
+        )
+        self.cb_single_type.stateChanged.connect(self._on_mode_changed)
+        mode_layout.addWidget(self.cb_single_type)
+
+        # Настройки сегментации
+        self.seg_settings_widget = QWidget()
+        seg_layout = QVBoxLayout(self.seg_settings_widget)
+        seg_layout.setContentsMargins(0, 0, 0, 0)
 
         row_min = QHBoxLayout()
         row_min.addWidget(QLabel("Мин. длительность, с:"))
@@ -306,7 +391,8 @@ class SegmentedPanel(QGroupBox):
         self.lbl_info.setStyleSheet("color: #888; font-size: 10px;")
         seg_layout.addWidget(self.lbl_info)
 
-        main_layout.addWidget(seg_settings)
+        mode_layout.addWidget(self.seg_settings_widget)
+        main_layout.addWidget(mode_group)
 
         # ── Пул сегментов ──
         pool_group = QGroupBox("Пул сигналов")
@@ -338,7 +424,7 @@ class SegmentedPanel(QGroupBox):
         main_layout.addWidget(pool_group)
 
         # ── Кнопка генерации ──
-        self.btn_generate = QPushButton("🎲 Сгенерировать сегментированный сигнал")
+        self.btn_generate = QPushButton("🎲 Сгенерировать сигнал")
         self.btn_generate.setStyleSheet(
             "QPushButton { background-color: #4CAF50; color: white; "
             "font-weight: bold; padding: 8px; font-size: 13px; }"
@@ -346,6 +432,10 @@ class SegmentedPanel(QGroupBox):
         )
         self.btn_generate.clicked.connect(self.generate_requested)
         main_layout.addWidget(self.btn_generate)
+
+    def _on_mode_changed(self):
+        is_single = self.cb_single_type.isChecked()
+        self.seg_settings_widget.setVisible(not is_single)
 
     def _add_entry(self, type_idx: int = 0) -> SegmentEntryWidget:
         idx = len(self._entries)
@@ -380,11 +470,28 @@ class SegmentedPanel(QGroupBox):
 
     # ── Публичный API ──
 
+    @property
+    def is_single_type(self) -> bool:
+        return self.cb_single_type.isChecked()
+
     def get_pool_entries(self) -> list[SegmentPoolEntry]:
         return [e.to_entry() for e in self._entries]
+
+    def get_first_enabled_entry(self) -> SegmentPoolEntry | None:
+        for e in self._entries:
+            entry = e.to_entry()
+            if entry.enabled:
+                return entry
+        return None
 
     def get_seg_min_duration(self) -> float:
         return self.spin_seg_min.value()
 
     def get_seg_max_duration(self) -> float:
         return self.spin_seg_max.value()
+
+    def get_duration(self) -> float:
+        return self.sim_widget.get_duration()
+
+    def get_sample_rate(self) -> float:
+        return self.sim_widget.get_sample_rate()

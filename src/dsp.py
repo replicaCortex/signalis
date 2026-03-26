@@ -10,6 +10,7 @@ class SignalType(IntEnum):
     SAWTOOTH = 2
     IMPULSE = 3
     EXPONENTIAL_IMPULSE = 4
+    SPEECH = 5
 
 
 class NoiseType(IntEnum):
@@ -19,6 +20,7 @@ class NoiseType(IntEnum):
     BROWN = 3
     BLUE = 4
     VIOLET = 5
+    EXPONENTIAL = 6
 
 
 def generate_harmonics(
@@ -42,11 +44,6 @@ def generate_gaussian(
     amps: list[float],
     sigmas: list[float],
 ) -> np.ndarray:
-    """
-    Гауссов импульс.
-    centers — центр импульса (в секундах),
-    sigmas — ширина (сигма) импульса (в секундах).
-    """
     t = np.arange(n) * dt
     if not centers:
         return np.zeros(n)
@@ -83,23 +80,15 @@ def generate_impulse(
     dt: float,
     widths: list[float],
     amps: list[float],
-    periods: list[float],  # Переименовали distances в periods
+    periods: list[float],
 ) -> np.ndarray:
-    """
-    Периодическая последовательность прямоугольных импульсов.
-    widths - длительность импульса (с)
-    periods - период повторения (с). Если <= 0, то одиночный импульс.
-    """
     t = np.arange(n) * dt
     result = np.zeros(n)
     for w, a, period in zip(widths, amps, periods):
         if period <= 0:
-            # Одиночный импульс от t=0 до t=w
             mask = (t >= 0) & (t <= w)
             result[mask] += a
         else:
-            # Периодические импульсы (остаток от деления времени на период)
-            # Если время внутри периода меньше длительности импульса - сигнал включен
             mask = (t % period) <= w
             result[mask] += a
     return result
@@ -110,20 +99,74 @@ def generate_exponential_impulse(
     dt: float,
     alphas: list[float],
     amps: list[float],
-    delays: list[float],  # Добавили задержку
+    delays: list[float],
 ) -> np.ndarray:
-    """
-    Экспоненциальный импульс: A * exp(alpha * (t - delay)) для t >= delay.
-    alpha < 0 - затухание, alpha > 0 - нарастание.
-    """
     t = np.arange(n) * dt
     result = np.zeros(n)
     for alpha, a, delay in zip(alphas, amps, delays):
-        # Включаем сигнал только после времени delay
         mask = t >= delay
-        # Считаем экспоненту только для нужных точек (чтобы не было переполнения)
         result[mask] += a * np.exp(alpha * (t[mask] - delay))
     return result
+
+
+def load_speech_signal(
+    file_path: str,
+    n: int,
+    target_sr: float,
+) -> np.ndarray:
+    """
+    Загружает WAV-файл и приводит к нужной длине и частоте дискретизации.
+    Возвращает нормализованный сигнал длиной n.
+    """
+    import wave
+
+    try:
+        with wave.open(file_path, "rb") as wf:
+            n_channels = wf.getnchannels()
+            sampwidth = wf.getsampwidth()
+            framerate = wf.getframerate()
+            n_frames = wf.getnframes()
+
+            raw = wf.readframes(n_frames)
+
+        # Декодируем
+        if sampwidth == 1:
+            data = np.frombuffer(raw, dtype=np.uint8).astype(np.float64) - 128.0
+        elif sampwidth == 2:
+            data = np.frombuffer(raw, dtype=np.int16).astype(np.float64)
+        elif sampwidth == 4:
+            data = np.frombuffer(raw, dtype=np.int32).astype(np.float64)
+        else:
+            return np.zeros(n)
+
+        # Моно
+        if n_channels > 1:
+            data = data.reshape(-1, n_channels)[:, 0]
+
+        # Нормализация
+        max_val = np.max(np.abs(data))
+        if max_val > 0:
+            data = data / max_val
+
+        # Ресэмплинг если частоты не совпадают
+        if framerate != target_sr:
+            original_duration = len(data) / framerate
+            target_n = int(original_duration * target_sr)
+            indices = np.linspace(0, len(data) - 1, target_n)
+            data = np.interp(indices, np.arange(len(data)), data)
+
+        # Приведение к нужной длине
+        if len(data) >= n:
+            result = data[:n]
+        else:
+            # Повторяем сигнал если он короче
+            repeats = int(np.ceil(n / len(data)))
+            result = np.tile(data, repeats)[:n]
+
+        return result
+
+    except Exception:
+        return np.zeros(n)
 
 
 def generate_noise(
@@ -230,6 +273,25 @@ def generate_violet_noise(
     return result
 
 
+def generate_exponential_noise(
+    n: int,
+    amplitude: float = 1.0,
+) -> np.ndarray:
+    """
+    Экспоненциальный шум: значения с экспоненциальным распределением,
+    центрированные (среднее вычтено) и нормализованные.
+    """
+    rng = np.random.default_rng()
+    raw = rng.exponential(scale=1.0, size=n)
+    # Центрируем
+    raw -= np.mean(raw)
+    # Нормализуем
+    max_val = np.max(np.abs(raw))
+    if max_val > 0:
+        raw = raw / max_val
+    return amplitude * raw
+
+
 def generate_colored_noise(
     noise_type: NoiseType,
     n: int,
@@ -242,6 +304,7 @@ def generate_colored_noise(
         NoiseType.BROWN: generate_brown_noise,
         NoiseType.BLUE: generate_blue_noise,
         NoiseType.VIOLET: generate_violet_noise,
+        NoiseType.EXPONENTIAL: generate_exponential_noise,
     }
     gen = generators[noise_type]
     return gen(n, amplitude)
@@ -276,18 +339,12 @@ def compute_dft(
 def compute_fft(
     signal: np.ndarray,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """
-    Быстрое преобразование Фурье.
-    Возвращает: (magnitude, phase_deg, complex_spectrum)
-    """
     n = len(signal)
     spectrum = np.fft.fft(signal)
 
-    # Нормировка
     magnitude = np.abs(spectrum) * 2.0 / n
-    magnitude[0] /= 2.0  # DC компонента
+    magnitude[0] /= 2.0
 
-    # Фаза в градусах
     phase_rad = np.angle(spectrum)
     phase_deg = np.degrees(phase_rad)
 
@@ -298,9 +355,6 @@ def compute_psd(
     signal: np.ndarray,
     dt: float,
 ) -> np.ndarray:
-    """
-    Спектральная плотность мощности (СПМ).
-    """
     n = len(signal)
     spectrum = np.fft.fft(signal)
     psd = (np.abs(spectrum) ** 2) / (n * dt)
@@ -310,15 +364,12 @@ def compute_psd(
 def compute_acf(
     signal: np.ndarray,
 ) -> np.ndarray:
-    """
-    Автокорреляционная функция (АКФ).
-    """
     n = len(signal)
     mean = np.mean(signal)
     signal_centered = signal - mean
 
     acf = np.correlate(signal_centered, signal_centered, mode="full")
-    acf = acf[n - 1 :]  # Берём только положительные лаги
-    acf = acf / acf[0] if acf[0] != 0 else acf  # Нормировка
+    acf = acf[n - 1 :]
+    acf = acf / acf[0] if acf[0] != 0 else acf
 
     return acf

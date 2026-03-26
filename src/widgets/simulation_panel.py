@@ -1,71 +1,113 @@
 # src/widgets/simulation_panel.py
+from PyQt5.QtCore import pyqtSignal
 from PyQt5.QtWidgets import (
+    QDoubleSpinBox,
+    QFormLayout,
     QGroupBox,
     QLabel,
     QLineEdit,
+    QSpinBox,
+    QToolButton,
     QVBoxLayout,
+    QWidget,
 )
 
 
-def _add(layout: QVBoxLayout, label: str, widget):
-    layout.addWidget(QLabel(label))
-    layout.addWidget(widget)
+class CollapsibleSimulationWidget(QWidget):
+    """Компактный сворачиваемый виджет параметров симуляции."""
 
-
-class SimulationPanel(QGroupBox):
-    """Панель параметров симуляции: T, dt, N, Fd."""
+    params_changed = pyqtSignal()
 
     def __init__(self, parent=None):
-        super().__init__("Параметры симуляции", parent)
+        super().__init__(parent)
+        self._build_ui()
 
-        layout = QVBoxLayout(self)
+    def _build_ui(self):
+        outer_layout = QVBoxLayout(self)
+        outer_layout.setContentsMargins(0, 0, 0, 0)
+        outer_layout.setSpacing(0)
 
-        self.ed_T = QLineEdit("1.0")
-        self.ed_dt = QLineEdit("0.01")
-        self.ed_N = QLineEdit("100")
-        self.ed_fd = QLineEdit("100.0")
+        # ── Кнопка-заголовок ──
+        self._toggle_btn = QToolButton()
+        self._toggle_btn.setText("▶ Параметры симуляции")
+        self._toggle_btn.setCheckable(True)
+        self._toggle_btn.setChecked(False)
+        self._toggle_btn.setStyleSheet(
+            "QToolButton {"
+            "  font-weight: bold; font-size: 12px;"
+            "  border: 1px solid #ccc; border-radius: 3px;"
+            "  padding: 4px 8px; background: #f5f5f5;"
+            "  text-align: left;"
+            "}"
+            "QToolButton:checked { background: #e0e0e0; }"
+            "QToolButton:hover   { background: #e8e8e8; }"
+        )
+        self._toggle_btn.setToolButtonStyle(2)  # Qt.ToolButtonTextOnly workaround
+        self._toggle_btn.setSizePolicy(
+            self._toggle_btn.sizePolicy().horizontalPolicy(),
+            self._toggle_btn.sizePolicy().verticalPolicy(),
+        )
+        self._toggle_btn.toggled.connect(self._on_toggle)
+        outer_layout.addWidget(self._toggle_btn)
 
-        # dt и N — автовычисляемые, только для чтения
-        self.ed_dt.setReadOnly(True)
-        self.ed_N.setReadOnly(True)
-        self.ed_dt.setStyleSheet("background-color: #f0f0f0;")
-        self.ed_N.setStyleSheet("background-color: #f0f0f0;")
+        # ── Содержимое (скрыто по умолчанию) ──
+        self._content = QWidget()
+        form = QFormLayout(self._content)
+        form.setContentsMargins(6, 4, 6, 4)
+        form.setSpacing(4)
 
-        _add(layout, "Время T, с:", self.ed_T)
-        _add(layout, "Шаг ΔT, с (авто):", self.ed_dt)
-        _add(layout, "Кол-во точек N (авто):", self.ed_N)
-        _add(layout, "Частота дискретизации Fd, Гц:", self.ed_fd)
+        # Время T
+        self.spin_T = QDoubleSpinBox()
+        self.spin_T.setRange(0.001, 100000.0)
+        self.spin_T.setValue(1.0)
+        self.spin_T.setDecimals(4)
+        self.spin_T.setSingleStep(0.1)
+        self.spin_T.setSuffix(" с")
+        self.spin_T.valueChanged.connect(self._update_derived)
+        form.addRow("Время T:", self.spin_T)
 
-        # Автообновление при изменении T или Fd
-        self.ed_T.textChanged.connect(self._update_derived_params)
-        self.ed_fd.textChanged.connect(self._update_derived_params)
+        # Частота дискретизации Fd
+        self.spin_fd = QDoubleSpinBox()
+        self.spin_fd.setRange(1.0, 1000000.0)
+        self.spin_fd.setValue(100.0)
+        self.spin_fd.setDecimals(1)
+        self.spin_fd.setSingleStep(10.0)
+        self.spin_fd.setSuffix(" Гц")
+        self.spin_fd.valueChanged.connect(self._update_derived)
+        form.addRow("Частота Fd:", self.spin_fd)
 
-        layout.addStretch()
+        # dt (авто)
+        self.lbl_dt = QLabel("0.010000 с")
+        self.lbl_dt.setStyleSheet("color: #555; background: #f0f0f0; padding: 2px 4px;")
+        form.addRow("Шаг ΔT (авто):", self.lbl_dt)
 
-        # Инициализируем
-        self._update_derived_params()
+        # N (авто)
+        self.lbl_N = QLabel("100")
+        self.lbl_N.setStyleSheet("color: #555; background: #f0f0f0; padding: 2px 4px;")
+        form.addRow("Точек N (авто):", self.lbl_N)
 
-    def _update_derived_params(self):
-        """Обновляет dt и N на основе T и Fd."""
-        try:
-            T = float(self.ed_T.text())
-            fd = float(self.ed_fd.text())
-            if fd > 0 and T > 0:
-                dt = 1.0 / fd
-                N = int(round(T / dt))
-                self.ed_dt.setText(f"{dt:.6f}")
-                self.ed_N.setText(str(N))
-        except (ValueError, ZeroDivisionError):
-            pass
+        self._content.setVisible(False)
+        outer_layout.addWidget(self._content)
+
+        self._update_derived()
+
+    def _on_toggle(self, checked: bool):
+        self._content.setVisible(checked)
+        arrow = "▼" if checked else "▶"
+        self._toggle_btn.setText(f"{arrow} Параметры симуляции")
+
+    def _update_derived(self):
+        T = self.spin_T.value()
+        fd = self.spin_fd.value()
+        if fd > 0 and T > 0:
+            dt = 1.0 / fd
+            N = int(round(T / dt))
+            self.lbl_dt.setText(f"{dt:.6f} с")
+            self.lbl_N.setText(str(N))
+        self.params_changed.emit()
 
     def get_duration(self) -> float:
-        try:
-            return float(self.ed_T.text())
-        except ValueError:
-            return 1.0
+        return self.spin_T.value()
 
     def get_sample_rate(self) -> float:
-        try:
-            return float(self.ed_fd.text())
-        except ValueError:
-            return 100.0
+        return self.spin_fd.value()

@@ -1,7 +1,13 @@
 # src/widgets/statistics_panel.py
+from PyQt5.QtCore import pyqtSignal
 from PyQt5.QtWidgets import (
+    QComboBox,
+    QFileDialog,
     QGroupBox,
+    QHBoxLayout,
     QLabel,
+    QMessageBox,
+    QPushButton,
     QScrollArea,
     QVBoxLayout,
     QWidget,
@@ -18,6 +24,8 @@ def _fmt(value: float) -> str:
 class StatisticsPanel(QGroupBox):
     """Панель характеристик сигнала (левая вкладка)."""
 
+    export_wav_requested = pyqtSignal(str, int)  # (file_path, signal_index)
+
     def __init__(self, parent=None):
         super().__init__("Характеристики", parent)
         self._build_ui()
@@ -30,7 +38,46 @@ class StatisticsPanel(QGroupBox):
         scroll_widget = QWidget()
         scroll_layout = QVBoxLayout(scroll_widget)
 
-        # Мощность
+        # ── Экспорт WAV ──
+        export_group = QGroupBox("Экспорт в WAV")
+        export_layout = QVBoxLayout(export_group)
+
+        export_desc = QLabel("Сохранить текущий сигнал в WAV файл (16-bit PCM, моно).")
+        export_desc.setStyleSheet("color: #666; font-size: 10px;")
+        export_desc.setWordWrap(True)
+        export_layout.addWidget(export_desc)
+
+        signal_row = QHBoxLayout()
+        signal_row.addWidget(QLabel("Сигнал:"))
+        self.combo_export_signal = QComboBox()
+        self.combo_export_signal.addItems(
+            [
+                "Базовый",
+                "Результирующий (с шумом)",
+                "Отфильтрованный",
+            ]
+        )
+        self.combo_export_signal.setCurrentIndex(1)
+        signal_row.addWidget(self.combo_export_signal)
+        export_layout.addLayout(signal_row)
+
+        self.btn_export_wav = QPushButton("💾 Экспорт в WAV")
+        self.btn_export_wav.setStyleSheet(
+            "QPushButton { background-color: #FF9800; color: white; "
+            "font-weight: bold; padding: 6px; font-size: 12px; }"
+            "QPushButton:hover { background-color: #F57C00; }"
+        )
+        self.btn_export_wav.clicked.connect(self._on_export_clicked)
+        export_layout.addWidget(self.btn_export_wav)
+
+        self.lbl_export_status = QLabel("")
+        self.lbl_export_status.setStyleSheet("font-size: 10px;")
+        self.lbl_export_status.setWordWrap(True)
+        export_layout.addWidget(self.lbl_export_status)
+
+        scroll_layout.addWidget(export_group)
+
+        # ── Мощность ──
         power_group = QGroupBox("Мощность сигнала")
         power_layout = QVBoxLayout(power_group)
         self.lbl_total_power = QLabel("Полная мощность: —")
@@ -84,6 +131,26 @@ class StatisticsPanel(QGroupBox):
         scroll_layout.addStretch()
         scroll.setWidget(scroll_widget)
         layout.addWidget(scroll)
+
+    def _on_export_clicked(self):
+        """Открывает диалог сохранения и эмитирует сигнал экспорта."""
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Сохранить WAV файл",
+            "signal.wav",
+            "WAV файлы (*.wav);;Все файлы (*.*)",
+        )
+        if path:
+            if not path.lower().endswith(".wav"):
+                path += ".wav"
+            signal_idx = self.combo_export_signal.currentIndex()
+            self.export_wav_requested.emit(path, signal_idx)
+
+    def set_export_status(self, message: str, is_error: bool = False):
+        """Устанавливает статус экспорта."""
+        color = "#D32F2F" if is_error else "#388E3C"
+        self.lbl_export_status.setStyleSheet(f"color: {color}; font-size: 10px;")
+        self.lbl_export_status.setText(message)
 
     def update_statistics(self, stats: SignalStatistics):
         self.lbl_total_power.setText(f"Полная мощность: {_fmt(stats.total_power)}")

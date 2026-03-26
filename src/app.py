@@ -17,6 +17,7 @@ from dsp import (
     generate_impulse,
     generate_noise,
     generate_sawtooth,
+    load_speech_signal,
 )
 from filters import (
     FilterType,
@@ -41,38 +42,6 @@ class SignalParams:
     @property
     def df(self) -> float:
         return 1.0 / self.duration
-
-
-@dataclass
-class Harmonic:
-    freq: float
-    amp: float
-    phase_deg: float
-
-    @property
-    def phase_rad(self) -> float:
-        return np.radians(self.phase_deg)
-
-
-@dataclass
-class ImpulseComponent:
-    width: float
-    amp: float
-    distance: float
-
-
-@dataclass
-class GaussianComponent:
-    center: float
-    amp: float
-    sigma: float
-
-
-@dataclass
-class ExponentialComponent:
-    alpha: float
-    amp: float
-    delay: float
 
 
 @dataclass
@@ -138,7 +107,6 @@ class SignalData:
     statistics: SignalStatistics = field(default_factory=SignalStatistics)
     has_noise: bool = False
 
-    # Информация о сегментах
     segment_boundaries: list = field(default_factory=list)
     segment_labels: list = field(default_factory=list)
 
@@ -191,6 +159,10 @@ class SegmentPoolEntry:
     exp_alpha: float = -5.0
     exp_amp: float = 1.0
 
+    # Речевой сигнал
+    speech_file: str = ""
+    speech_amp: float = 1.0
+
     def min_duration_for_one_period(self) -> float:
         """Минимальная длительность сегмента для одного полного периода."""
         match self.signal_type:
@@ -207,11 +179,13 @@ class SegmentPoolEntry:
                     return self.impulse_period
                 return self.impulse_width * 2
             case SignalType.GAUSSIAN:
-                return self.gauss_sigma * 6  # ±3σ
+                return self.gauss_sigma * 6
             case SignalType.EXPONENTIAL_IMPULSE:
                 if self.exp_alpha != 0:
                     return min(abs(3.0 / self.exp_alpha), 1.0)
                 return 0.1
+            case SignalType.SPEECH:
+                return 0.01
         return 0.01
 
 
@@ -246,7 +220,77 @@ def _generate_segment_signal(
             return generate_exponential_impulse(
                 n_samples, dt, [entry.exp_alpha], [entry.exp_amp], [0.0]
             )
+        case SignalType.SPEECH:
+            if entry.speech_file:
+                target_sr = 1.0 / dt
+                signal = load_speech_signal(entry.speech_file, n_samples, target_sr)
+                return signal * entry.speech_amp
+            return np.zeros(n_samples)
     return np.zeros(n_samples)
+
+
+def _build_colored_noise(
+    n: int,
+    noise_entries: list[ColoredNoiseEntry],
+) -> np.ndarray:
+    result = np.zeros(n)
+    for entry in noise_entries:
+        if entry.enabled:
+            result += generate_colored_noise(entry.noise_type, n, entry.amplitude)
+    return result
+
+
+def _finalize_signal_data(
+    data: SignalData,
+    dt: float,
+    colored_noise_entries: list[ColoredNoiseEntry] | None = None,
+) -> SignalData:
+    """Общая финализация: шумы, спектры, статистики."""
+    total_n = data.n
+
+    if colored_noise_entries:
+        data.colored_noise = _build_colored_noise(total_n, colored_noise_entries)
+
+    data.combined = data.base + data.noise + data.colored_noise
+
+    has_noise = colored_noise_entries and any(e.enabled for e in colored_noise_entries)
+    data.has_noise = has_noise
+
+    _, _, mag, phase_deg = compute_dft(data.combined)
+    data.spectrum_mag = mag
+    data.spectrum_phase = phase_deg
+
+    fft_mag, fft_phase, _ = compute_fft(data.combined)
+    data.fft_mag = fft_mag
+    data.fft_phase = fft_phase
+
+    data.psd = compute_psd(data.combined, dt)
+    data.acf = compute_acf(data.combined)
+
+    if has_noise:
+        _, _, spectrum = compute_fft(data.combined)
+        phase_signal = np.angle(spectrum)
+        data.phase_psd = compute_psd(phase_signal, dt)
+
+    data.statistics = compute_statistics(data.combined, dt)
+
+    return data
+
+
+def generate_single_type_signal(
+    params: SignalParams,
+    entry: SegmentPoolEntry,
+    colored_noise_entries: list[ColoredNoiseEntry] | None = None,
+) -> SignalData:
+    """Генерирует сигнал одного типа на всю длительность."""
+    n = params.n_samples
+    dt = params.dt
+    data = SignalData()
+    data.allocate(n)
+
+    data.base = _generate_segment_signal(entry, n, dt)
+
+    return _finalize_signal_data(data, dt, colored_noise_entries)
 
 
 def generate_segmented_signal(
@@ -256,16 +300,7 @@ def generate_segmented_signal(
     seg_max_duration: float = 0.3,
     colored_noise_entries: list[ColoredNoiseEntry] | None = None,
 ) -> SignalData:
-    """
-    Генерирует сигнал из случайно расположенных сегментов.
-
-    Для каждого выбранного сегмента:
-    - вычисляется min_period = min_duration_for_one_period()
-    - effective_min = max(seg_min_duration, min_period)
-    - effective_max = max(seg_max_duration, effective_min)
-    - если оставшееся место < effective_min — сегмент пропускается,
-      выбирается другой или заполнение завершается.
-    """
+    """Генерирует сигнал из случайно расположенных сегментов."""
     dt = params.dt
     total_n = params.n_samples
     data = SignalData()
@@ -288,16 +323,14 @@ def generate_segmented_signal(
         SignalType.SAWTOOTH: "Пила",
         SignalType.IMPULSE: "Импульс",
         SignalType.EXPONENTIAL_IMPULSE: "Эксп",
+        SignalType.SPEECH: "Речь",
     }
 
     pos = 0
-    max_retries = 50  # защита от зацикливания
 
     while pos < total_n:
         remaining_time = (total_n - pos) * dt
 
-        # Пробуем найти подходящий сегмент из пула
-        # Перемешиваем пул и ищем первый, который влезает
         indices = list(range(len(enabled_pool)))
         rng.shuffle(indices)
 
@@ -305,46 +338,36 @@ def generate_segmented_signal(
         for idx in indices:
             entry = enabled_pool[idx]
 
-            # Минимальная длительность для полного периода
             min_period = entry.min_duration_for_one_period()
             effective_min = max(seg_min_duration, min_period)
             effective_max = max(seg_max_duration, effective_min)
 
-            # Проверяем, влезает ли сегмент минимального размера
             if remaining_time < effective_min:
-                continue  # этот тип не влезает, пробуем другой
+                continue
 
-            # Ограничиваем максимум оставшимся временем
             actual_max = min(effective_max, remaining_time)
             actual_min = effective_min
 
-            # Если после ограничения min > max — пропускаем
             if actual_min > actual_max:
                 continue
 
-            # Случайная длительность
             seg_duration = rng.uniform(actual_min, actual_max)
             seg_n = int(round(seg_duration / dt))
 
-            # Гарантируем минимальное количество сэмплов
             min_samples = max(1, int(np.ceil(effective_min / dt)))
             seg_n = max(seg_n, min_samples)
 
-            # Не выходим за границы
             if pos + seg_n > total_n:
                 seg_n = total_n - pos
 
-            # Финальная проверка: после обрезки сегмент всё ещё >= минимума?
             if seg_n < min_samples:
-                continue  # обрезанный сегмент слишком короткий
+                continue
 
             if seg_n <= 0:
                 continue
 
-            # Генерируем сигнал
             seg_signal = _generate_segment_signal(entry, seg_n, dt)
 
-            # Кроссфейд
             fade_len = max(1, seg_n // 20)
             if seg_n > fade_len * 2:
                 fade_in = np.linspace(0, 1, fade_len)
@@ -363,44 +386,50 @@ def generate_segmented_signal(
             break
 
         if not placed:
-            # Ни один сегмент из пула не влезает в оставшееся место — заканчиваем
             break
 
     data.base = result
     data.segment_boundaries = boundaries
     data.segment_labels = labels
 
-    # Цветные шумы
-    if colored_noise_entries:
-        data.colored_noise = _build_colored_noise(total_n, colored_noise_entries)
+    return _finalize_signal_data(data, dt, colored_noise_entries)
 
-    data.combined = data.base + data.noise + data.colored_noise
 
-    has_noise = colored_noise_entries and any(e.enabled for e in colored_noise_entries)
-    data.has_noise = has_noise
+def export_signal_to_wav(
+    signal: np.ndarray,
+    sample_rate: float,
+    file_path: str,
+) -> str:
+    """
+    Экспортирует сигнал в WAV файл (16-bit PCM).
+    Возвращает пустую строку при успехе или сообщение об ошибке.
+    """
+    import wave
 
-    # DFT
-    _, _, mag, phase_deg = compute_dft(data.combined)
-    data.spectrum_mag = mag
-    data.spectrum_phase = phase_deg
+    try:
+        if len(signal) == 0:
+            return "Сигнал пуст — нечего экспортировать."
 
-    # FFT
-    fft_mag, fft_phase, _ = compute_fft(data.combined)
-    data.fft_mag = fft_mag
-    data.fft_phase = fft_phase
+        # Нормализация в диапазон int16
+        max_val = np.max(np.abs(signal))
+        if max_val > 0:
+            normalized = signal / max_val
+        else:
+            normalized = signal
 
-    # СПМ и АКФ
-    data.psd = compute_psd(data.combined, dt)
-    data.acf = compute_acf(data.combined)
+        # Преобразуем в int16
+        int_data = np.clip(normalized * 32767, -32768, 32767).astype(np.int16)
 
-    if has_noise:
-        _, _, spectrum = compute_fft(data.combined)
-        phase_signal = np.angle(spectrum)
-        data.phase_psd = compute_psd(phase_signal, dt)
+        with wave.open(file_path, "wb") as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)  # 16 bit
+            wf.setframerate(int(sample_rate))
+            wf.writeframes(int_data.tobytes())
 
-    data.statistics = compute_statistics(data.combined, dt)
+        return ""
 
-    return data
+    except Exception as e:
+        return f"Ошибка экспорта: {e}"
 
 
 def compute_statistics(signal: np.ndarray, dt: float) -> SignalStatistics:
@@ -427,135 +456,6 @@ def compute_statistics(signal: np.ndarray, dt: float) -> SignalStatistics:
     stats.psd_std = np.std(psd)
 
     return stats
-
-
-def _build_base_signal(
-    signal_type: SignalType,
-    n: int,
-    dt: float,
-    harmonics: list[Harmonic] | None = None,
-    impulse_components: list[ImpulseComponent] | None = None,
-    gaussian_components: list[GaussianComponent] | None = None,
-    exponential_components: list[ExponentialComponent] | None = None,
-) -> np.ndarray:
-    match signal_type:
-        case SignalType.HARMONIC:
-            if not harmonics:
-                return np.zeros(n)
-            freqs = [h.freq for h in harmonics]
-            amps = [h.amp for h in harmonics]
-            phases = [h.phase_rad for h in harmonics]
-            return generate_harmonics(n, dt, freqs, amps, phases)
-
-        case SignalType.GAUSSIAN:
-            if not gaussian_components:
-                return np.zeros(n)
-            centers = [g.center for g in gaussian_components]
-            amps = [g.amp for g in gaussian_components]
-            sigmas = [g.sigma for g in gaussian_components]
-            return generate_gaussian(n, dt, centers, amps, sigmas)
-
-        case SignalType.SAWTOOTH:
-            if not harmonics:
-                return np.zeros(n)
-            freqs = [h.freq for h in harmonics]
-            amps = [h.amp for h in harmonics]
-            return generate_sawtooth(n, dt, freqs, amps)
-
-        case SignalType.IMPULSE:
-            if not impulse_components:
-                return np.zeros(n)
-            widths = [ic.width for ic in impulse_components]
-            amps = [ic.amp for ic in impulse_components]
-            distances = [ic.distance for ic in impulse_components]
-            return generate_impulse(n, dt, widths, amps, distances)
-
-        case SignalType.EXPONENTIAL_IMPULSE:
-            if not exponential_components:
-                return np.zeros(n)
-            alphas = [ec.alpha for ec in exponential_components]
-            amps = [ec.amp for ec in exponential_components]
-            delays = [ec.delay for ec in exponential_components]
-            return generate_exponential_impulse(n, dt, alphas, amps, delays)
-
-    return np.zeros(n)
-
-
-def _build_colored_noise(
-    n: int,
-    noise_entries: list[ColoredNoiseEntry],
-) -> np.ndarray:
-    result = np.zeros(n)
-    for entry in noise_entries:
-        if entry.enabled:
-            result += generate_colored_noise(entry.noise_type, n, entry.amplitude)
-    return result
-
-
-def generate_signal(
-    params: SignalParams,
-    signal_type: SignalType = SignalType.HARMONIC,
-    harmonics: list[Harmonic] | None = None,
-    impulse_components: list[ImpulseComponent] | None = None,
-    gaussian_components: list[GaussianComponent] | None = None,
-    exponential_components: list[ExponentialComponent] | None = None,
-    noise_params: NoiseParams | None = None,
-    colored_noise_entries: list[ColoredNoiseEntry] | None = None,
-) -> SignalData:
-    n = params.n_samples
-    dt = params.dt
-    data = SignalData()
-    data.allocate(n)
-
-    data.base = _build_base_signal(
-        signal_type,
-        n,
-        dt,
-        harmonics=harmonics,
-        impulse_components=impulse_components,
-        gaussian_components=gaussian_components,
-        exponential_components=exponential_components,
-    )
-
-    if noise_params and noise_params.enabled and harmonics:
-        data.noise = generate_noise(
-            n,
-            dt,
-            noise_params.freq,
-            noise_params.amp_min,
-            noise_params.amp_max,
-            n_components=len(harmonics),
-        )
-
-    if colored_noise_entries:
-        data.colored_noise = _build_colored_noise(n, colored_noise_entries)
-
-    data.combined = data.base + data.noise + data.colored_noise
-
-    has_noise = (noise_params and noise_params.enabled) or (
-        colored_noise_entries and any(e.enabled for e in colored_noise_entries)
-    )
-    data.has_noise = has_noise
-
-    _, _, mag, phase_deg = compute_dft(data.combined)
-    data.spectrum_mag = mag
-    data.spectrum_phase = phase_deg
-
-    fft_mag, fft_phase, _ = compute_fft(data.combined)
-    data.fft_mag = fft_mag
-    data.fft_phase = fft_phase
-
-    data.psd = compute_psd(data.combined, dt)
-    data.acf = compute_acf(data.combined)
-
-    if has_noise:
-        _, _, spectrum = compute_fft(data.combined)
-        phase_signal = np.angle(spectrum)
-        data.phase_psd = compute_psd(phase_signal, dt)
-
-    data.statistics = compute_statistics(data.combined, dt)
-
-    return data
 
 
 def apply_filter_to_data(

@@ -16,8 +16,6 @@ from app import SignalData, SignalParams
 
 
 class PlotTab(QWidget):
-    """Одна вкладка с графиком."""
-
     def __init__(self, parent=None):
         super().__init__(parent)
         self.figure = Figure(tight_layout=True)
@@ -35,8 +33,6 @@ class PlotTab(QWidget):
 
 
 class SpectrumTab(QWidget):
-    """Вкладка с переключением DFT / FFT."""
-
     def __init__(self, parent=None):
         super().__init__(parent)
         self.figure = Figure(tight_layout=True)
@@ -67,8 +63,6 @@ class SpectrumTab(QWidget):
 
 
 class PhasePsdTab(QWidget):
-    """Вкладка с переключением Фазовый спектр / СПМ."""
-
     def __init__(self, parent=None):
         super().__init__(parent)
         self.figure = Figure(tight_layout=True)
@@ -98,25 +92,22 @@ class PhasePsdTab(QWidget):
         return self.combo.currentIndex() == 1
 
 
-# Цвета для типов сегментов
 SEGMENT_COLORS = {
     "Гарм": "#1f77b4",
     "Гаусс": "#ff7f0e",
     "Пила": "#2ca02c",
     "Импульс": "#d62728",
     "Эксп": "#9467bd",
+    "Речь": "#8c564b",
 }
 
 
 class PlotPanel(QWidget):
-    """Вкладки графиков + чекбоксы."""
-
     def __init__(self, parent=None):
         super().__init__(parent)
 
         layout = QVBoxLayout(self)
 
-        # Чекбоксы
         self.cb_base = QCheckBox("Базовый сигнал")
         self.cb_base.setChecked(True)
         self.cb_noise = QCheckBox("Помеха")
@@ -136,7 +127,6 @@ class PlotPanel(QWidget):
             cb_layout.addWidget(cb)
         layout.addLayout(cb_layout)
 
-        # Вкладки
         self.tabs = QTabWidget()
 
         self.tab_signals = PlotTab()
@@ -153,11 +143,9 @@ class PlotPanel(QWidget):
 
         layout.addWidget(self.tabs)
 
-        # Подключаем переключатели к перерисовке
         self.tab_spectrum.combo.currentIndexChanged.connect(self._on_spectrum_switch)
         self.tab_phase_psd.combo.currentIndexChanged.connect(self._on_phase_psd_switch)
 
-        # Храним последние данные для перерисовки
         self._last_params = None
         self._last_data = None
         self._last_show_filter = False
@@ -233,12 +221,10 @@ class PlotPanel(QWidget):
         self.tab_phase_psd.refresh()
 
     def _draw_segment_boundaries(self, ax, data, params):
-        """Рисует границы и метки сегментов на графике сигнала."""
         if not data.segment_boundaries:
             return
 
         dt = params.dt
-        y_min, y_max = ax.get_ylim()
         drawn_labels = set()
 
         for (start, end), label in zip(data.segment_boundaries, data.segment_labels):
@@ -246,7 +232,6 @@ class PlotPanel(QWidget):
             t_end = end * dt
             color = SEGMENT_COLORS.get(label, "#999999")
 
-            # Полупрозрачная заливка
             show_label = label not in drawn_labels
             ax.axvspan(
                 t_start,
@@ -257,7 +242,6 @@ class PlotPanel(QWidget):
             )
             drawn_labels.add(label)
 
-            # Вертикальные линии границ
             ax.axvline(t_start, color=color, linestyle="--", linewidth=0.5, alpha=0.5)
 
     def update_plots(
@@ -280,7 +264,6 @@ class PlotPanel(QWidget):
         freq = np.arange(n) * params.df
         bar_w = 0.8 * params.df
 
-        # --- Сигналы ---
         ax = self.tab_signals.ax
         ax.clear()
 
@@ -295,7 +278,6 @@ class PlotPanel(QWidget):
             if cb.isChecked() and len(sig) == n:
                 ax.plot(time, sig, label=label)
 
-        # Рисуем границы сегментов
         self._draw_segment_boundaries(ax, data, params)
 
         ax.set(xlabel="Время, с", ylabel="Амплитуда")
@@ -303,13 +285,9 @@ class PlotPanel(QWidget):
         ax.grid(True)
         self.tab_signals.refresh()
 
-        # --- Амплитудный спектр ---
         self._draw_spectrum()
-
-        # --- Фаза / СПМ ---
         self._draw_phase_psd()
 
-        # --- АКФ ---
         ax = self.tab_acf.ax
         ax.clear()
         if len(data.acf) == n:
@@ -320,7 +298,6 @@ class PlotPanel(QWidget):
         ax.grid(True)
         self.tab_acf.refresh()
 
-        # --- АЧХ ---
         ax = self.tab_freq_resp.ax
         ax.clear()
         if show_filter and len(data.freq_response) == n:
