@@ -1,4 +1,3 @@
-# src/dsp.py
 from enum import IntEnum
 
 import numpy as np
@@ -60,17 +59,24 @@ def generate_sawtooth(
     dt: float,
     freqs: list[float],
     amps: list[float],
+    phases: list[float] | None = None,
 ) -> np.ndarray:
     t = np.arange(n) * dt
     if not freqs:
         return np.zeros(n)
+    if phases is None:
+        phases = [0.0] * len(freqs)
     result = np.zeros(n)
-    for f, a in zip(freqs, amps):
+    for i, (f, a) in enumerate(zip(freqs, amps)):
         if f == 0:
             result += a
             continue
         period = 1.0 / f
-        phase = (t % period) / period
+        phase_shift = phases[i] if i < len(phases) else 0.0
+        # Фаза в градусах -> доля периода
+        phase_frac = (phase_shift % 360.0) / 360.0
+        phase_time = phase_frac * period
+        phase = ((t + phase_time) % period) / period
         result += a * (2.0 * phase - 1.0)
     return result
 
@@ -81,15 +87,21 @@ def generate_impulse(
     widths: list[float],
     amps: list[float],
     periods: list[float],
+    delays: list[float] | None = None,
 ) -> np.ndarray:
     t = np.arange(n) * dt
     result = np.zeros(n)
-    for w, a, period in zip(widths, amps, periods):
+    if delays is None:
+        delays = [0.0] * len(widths)
+    for i, (w, a, period) in enumerate(zip(widths, amps, periods)):
+        delay = delays[i] if i < len(delays) else 0.0
+        t_shifted = t - delay
         if period <= 0:
-            mask = (t >= 0) & (t <= w)
+            mask = (t_shifted >= 0) & (t_shifted <= w)
             result[mask] += a
         else:
-            mask = (t % period) <= w
+            valid = t_shifted >= 0
+            mask = valid & ((t_shifted % period) <= w)
             result[mask] += a
     return result
 
@@ -355,6 +367,7 @@ def compute_psd(
     signal: np.ndarray,
     dt: float,
 ) -> np.ndarray:
+    """Метод Шустера"""
     n = len(signal)
     spectrum = np.fft.fft(signal)
     psd = (np.abs(spectrum) ** 2) / (n * dt)

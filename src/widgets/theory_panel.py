@@ -1,4 +1,3 @@
-# src/widgets/theory_panel.py
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (
     QGroupBox,

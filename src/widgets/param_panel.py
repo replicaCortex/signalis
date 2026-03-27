@@ -1,4 +1,3 @@
-# src/widgets/param_panel.py
 from PyQt5.QtWidgets import (
     QComboBox,
     QGroupBox,
@@ -20,7 +19,6 @@ SIGNAL_NAMES = [
     "Экспоненциальный импульс",
 ]
 
-# Заголовки столбцов таблицы для каждого типа сигнала
 SIGNAL_TABLE_HEADERS = {
     SignalType.HARMONIC: ["Частота, Гц", "Амплитуда", "Фаза, °"],
     SignalType.GAUSSIAN: ["Центр, с", "Амплитуда", "Сигма, с"],
@@ -37,7 +35,7 @@ def _add(layout: QVBoxLayout, label: str, widget):
 
 class ParamPanel(QGroupBox):
     def __init__(self, parent=None):
-        super().__init__("Параметры сигнала", parent)
+        super().__init__("Параметры симуляции", parent)
 
         layout = QVBoxLayout(self)
 

@@ -1,4 +1,3 @@
-# src/widgets/noise_filter_panel.py
 from PyQt5.QtCore import pyqtSignal
 from PyQt5.QtWidgets import (
     QCheckBox,
@@ -20,12 +19,12 @@ from filters import FilterType
 
 NOISE_TYPE_NAMES = [
     "Равномерный",
-    "Белый (гауссовский)",
-    "Розовый (1/f)",
-    "Красный / Броуновский (1/f²)",
-    "Синий (f)",
-    "Фиолетовый (f²)",
     "Экспоненциальный",
+    "Белый",
+    "Розовый",
+    "Броуновский",
+    "Синий",
+    "Фиолетовый",
 ]
 
 FILTER_NAMES = [
@@ -78,7 +77,7 @@ class NoiseLayerWidget(QGroupBox):
         layout.addLayout(row2)
 
         # Кнопка удаления
-        self.btn_remove = QPushButton("✕ Удалить")
+        self.btn_remove = QPushButton("Удалить")
         self.btn_remove.clicked.connect(lambda: self.removed.emit(self))
         layout.addWidget(self.btn_remove)
 

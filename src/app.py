@@ -1,4 +1,3 @@
-# src/app.py
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -110,6 +109,10 @@ class SignalData:
     segment_boundaries: list = field(default_factory=list)
     segment_labels: list = field(default_factory=list)
 
+    x_axis_mode: str = "time"
+    gauss_center: float = 0.0
+    gauss_sigma: float = 1.0
+
     def allocate(self, n: int):
         self.n = n
         for attr in [
@@ -141,23 +144,29 @@ class SegmentPoolEntry:
     signal_type: SignalType = SignalType.HARMONIC
     enabled: bool = True
 
-    # Гармонический / Пилообразный
+    # Гармонический
     freq: float = 5.0
     amp: float = 1.0
     phase_deg: float = 0.0
 
+    # Пилообразный
+    saw_phase_deg: float = 0.0
+
     # Гауссов импульс
     gauss_amp: float = 1.0
     gauss_sigma: float = 0.05
+    gauss_center: float = 0.5
 
     # Импульсный
     impulse_width: float = 0.02
     impulse_amp: float = 1.0
     impulse_period: float = 0.1
+    impulse_delay: float = 0.0
 
     # Экспоненциальный
     exp_alpha: float = -5.0
     exp_amp: float = 1.0
+    exp_delay: float = 0.0
 
     # Речевой сигнал
     speech_file: str = ""
@@ -202,12 +211,18 @@ def _generate_segment_signal(
             )
         case SignalType.GAUSSIAN:
             duration = n_samples * dt
-            center = duration / 2.0
+            center = entry.gauss_center
+            if center < 0:
+                center = 0.0
+            if center > duration:
+                center = duration
             return generate_gaussian(
                 n_samples, dt, [center], [entry.gauss_amp], [entry.gauss_sigma]
             )
         case SignalType.SAWTOOTH:
-            return generate_sawtooth(n_samples, dt, [entry.freq], [entry.amp])
+            return generate_sawtooth(
+                n_samples, dt, [entry.freq], [entry.amp], [entry.saw_phase_deg]
+            )
         case SignalType.IMPULSE:
             return generate_impulse(
                 n_samples,
@@ -215,10 +230,11 @@ def _generate_segment_signal(
                 [entry.impulse_width],
                 [entry.impulse_amp],
                 [entry.impulse_period],
+                [entry.impulse_delay],
             )
         case SignalType.EXPONENTIAL_IMPULSE:
             return generate_exponential_impulse(
-                n_samples, dt, [entry.exp_alpha], [entry.exp_amp], [0.0]
+                n_samples, dt, [entry.exp_alpha], [entry.exp_amp], [entry.exp_delay]
             )
         case SignalType.SPEECH:
             if entry.speech_file:
@@ -290,6 +306,13 @@ def generate_single_type_signal(
 
     data.base = _generate_segment_signal(entry, n, dt)
 
+    if entry.signal_type == SignalType.GAUSSIAN:
+        data.x_axis_mode = "sigma"
+        data.gauss_center = entry.gauss_center
+        data.gauss_sigma = entry.gauss_sigma
+    else:
+        data.x_axis_mode = "time"
+
     return _finalize_signal_data(data, dt, colored_noise_entries)
 
 
@@ -305,6 +328,7 @@ def generate_segmented_signal(
     total_n = params.n_samples
     data = SignalData()
     data.allocate(total_n)
+    data.x_axis_mode = "time"
 
     enabled_pool = [e for e in pool if e.enabled]
     if not enabled_pool:

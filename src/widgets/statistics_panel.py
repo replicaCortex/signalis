@@ -1,4 +1,3 @@
-# src/widgets/statistics_panel.py
 from PyQt5.QtCore import pyqtSignal
 from PyQt5.QtWidgets import (
     QComboBox,
@@ -24,7 +23,7 @@ def _fmt(value: float) -> str:
 class StatisticsPanel(QGroupBox):
     """Панель характеристик сигнала (левая вкладка)."""
 
-    export_wav_requested = pyqtSignal(str, int)  # (file_path, signal_index)
+    export_wav_requested = pyqtSignal(str, int)
 
     def __init__(self, parent=None):
         super().__init__("Характеристики", parent)
@@ -38,7 +37,6 @@ class StatisticsPanel(QGroupBox):
         scroll_widget = QWidget()
         scroll_layout = QVBoxLayout(scroll_widget)
 
-        # ── Экспорт WAV ──
         export_group = QGroupBox("Экспорт в WAV")
         export_layout = QVBoxLayout(export_group)
 
@@ -53,7 +51,7 @@ class StatisticsPanel(QGroupBox):
         self.combo_export_signal.addItems(
             [
                 "Базовый",
-                "Результирующий (с шумом)",
+                "Результирующий",
                 "Отфильтрованный",
             ]
         )
@@ -61,7 +59,7 @@ class StatisticsPanel(QGroupBox):
         signal_row.addWidget(self.combo_export_signal)
         export_layout.addLayout(signal_row)
 
-        self.btn_export_wav = QPushButton("💾 Экспорт в WAV")
+        self.btn_export_wav = QPushButton("Экспорт в WAV")
         self.btn_export_wav.setStyleSheet(
             "QPushButton { background-color: #FF9800; color: white; "
             "font-weight: bold; padding: 6px; font-size: 12px; }"
@@ -77,7 +75,6 @@ class StatisticsPanel(QGroupBox):
 
         scroll_layout.addWidget(export_group)
 
-        # ── Мощность ──
         power_group = QGroupBox("Мощность сигнала")
         power_layout = QVBoxLayout(power_group)
         self.lbl_total_power = QLabel("Полная мощность: —")
@@ -86,7 +83,6 @@ class StatisticsPanel(QGroupBox):
         power_layout.addWidget(self.lbl_mean_power)
         scroll_layout.addWidget(power_group)
 
-        # Амплитуды
         amp_group = QGroupBox("Амплитуды")
         amp_layout = QVBoxLayout(amp_group)
         self.lbl_min_amp = QLabel("Минимальная амплитуда: —")
@@ -95,7 +91,6 @@ class StatisticsPanel(QGroupBox):
         amp_layout.addWidget(self.lbl_max_amp)
         scroll_layout.addWidget(amp_group)
 
-        # Статистики сигнала
         signal_group = QGroupBox("Статистики сигнала")
         signal_layout = QVBoxLayout(signal_group)
         self.lbl_signal_mean = QLabel("Математическое ожидание: —")
@@ -106,7 +101,6 @@ class StatisticsPanel(QGroupBox):
         signal_layout.addWidget(self.lbl_signal_std)
         scroll_layout.addWidget(signal_group)
 
-        # АКФ
         acf_group = QGroupBox("Оценки АКФ")
         acf_layout = QVBoxLayout(acf_group)
         self.lbl_acf_mean = QLabel("Математическое ожидание: —")
@@ -117,7 +111,6 @@ class StatisticsPanel(QGroupBox):
         acf_layout.addWidget(self.lbl_acf_std)
         scroll_layout.addWidget(acf_group)
 
-        # СПМ
         psd_group = QGroupBox("Оценки СПМ")
         psd_layout = QVBoxLayout(psd_group)
         self.lbl_psd_mean = QLabel("Математическое ожидание: —")

@@ -1,4 +1,3 @@
-# src/widgets/simulation_panel.py
 from PyQt5.QtCore import pyqtSignal
 from PyQt5.QtWidgets import (
     QDoubleSpinBox,
@@ -27,9 +26,8 @@ class CollapsibleSimulationWidget(QWidget):
         outer_layout.setContentsMargins(0, 0, 0, 0)
         outer_layout.setSpacing(0)
 
-        # ── Кнопка-заголовок ──
         self._toggle_btn = QToolButton()
-        self._toggle_btn.setText("▶ Параметры симуляции")
+        self._toggle_btn.setText("Параметры симуляции")
         self._toggle_btn.setCheckable(True)
         self._toggle_btn.setChecked(False)
         self._toggle_btn.setStyleSheet(
@@ -50,13 +48,11 @@ class CollapsibleSimulationWidget(QWidget):
         self._toggle_btn.toggled.connect(self._on_toggle)
         outer_layout.addWidget(self._toggle_btn)
 
-        # ── Содержимое (скрыто по умолчанию) ──
         self._content = QWidget()
         form = QFormLayout(self._content)
         form.setContentsMargins(6, 4, 6, 4)
         form.setSpacing(4)
 
-        # Время T
         self.spin_T = QDoubleSpinBox()
         self.spin_T.setRange(0.001, 100000.0)
         self.spin_T.setValue(1.0)
@@ -66,7 +62,6 @@ class CollapsibleSimulationWidget(QWidget):
         self.spin_T.valueChanged.connect(self._update_derived)
         form.addRow("Время T:", self.spin_T)
 
-        # Частота дискретизации Fd
         self.spin_fd = QDoubleSpinBox()
         self.spin_fd.setRange(1.0, 1000000.0)
         self.spin_fd.setValue(100.0)
@@ -76,15 +71,13 @@ class CollapsibleSimulationWidget(QWidget):
         self.spin_fd.valueChanged.connect(self._update_derived)
         form.addRow("Частота Fd:", self.spin_fd)
 
-        # dt (авто)
         self.lbl_dt = QLabel("0.010000 с")
         self.lbl_dt.setStyleSheet("color: #555; background: #f0f0f0; padding: 2px 4px;")
-        form.addRow("Шаг ΔT (авто):", self.lbl_dt)
+        form.addRow("Шаг ΔT:", self.lbl_dt)
 
-        # N (авто)
         self.lbl_N = QLabel("100")
         self.lbl_N.setStyleSheet("color: #555; background: #f0f0f0; padding: 2px 4px;")
-        form.addRow("Точек N (авто):", self.lbl_N)
+        form.addRow("Точек N:", self.lbl_N)
 
         self._content.setVisible(False)
         outer_layout.addWidget(self._content)
@@ -93,8 +86,7 @@ class CollapsibleSimulationWidget(QWidget):
 
     def _on_toggle(self, checked: bool):
         self._content.setVisible(checked)
-        arrow = "▼" if checked else "▶"
-        self._toggle_btn.setText(f"{arrow} Параметры симуляции")
+        self._toggle_btn.setText("Параметры симуляции")
 
     def _update_derived(self):
         T = self.spin_T.value()

@@ -1,4 +1,3 @@
-# src/widgets/segmented_panel.py
 from PyQt5.QtCore import pyqtSignal
 from PyQt5.QtWidgets import (
     QCheckBox,
@@ -68,7 +67,7 @@ class SegmentEntryWidget(QGroupBox):
         row_type.addWidget(self.combo_type)
         layout.addLayout(row_type)
 
-        # === Параметры для гармонического / пилообразного ===
+        # === Параметры для гармонического ===
         self.harmonic_group = QWidget()
         hg_layout = QVBoxLayout(self.harmonic_group)
         hg_layout.setContentsMargins(0, 0, 0, 0)
@@ -106,10 +105,57 @@ class SegmentEntryWidget(QGroupBox):
 
         layout.addWidget(self.harmonic_group)
 
+        # === Параметры для пилообразного ===
+        self.sawtooth_group = QWidget()
+        sw_layout = QVBoxLayout(self.sawtooth_group)
+        sw_layout.setContentsMargins(0, 0, 0, 0)
+
+        row_saw_freq = QHBoxLayout()
+        row_saw_freq.addWidget(QLabel("Частота, Гц:"))
+        self.spin_saw_freq = QDoubleSpinBox()
+        self.spin_saw_freq.setRange(0.1, 50000.0)
+        self.spin_saw_freq.setValue(5.0)
+        self.spin_saw_freq.setDecimals(2)
+        self.spin_saw_freq.setSingleStep(1.0)
+        row_saw_freq.addWidget(self.spin_saw_freq)
+        sw_layout.addLayout(row_saw_freq)
+
+        row_saw_amp = QHBoxLayout()
+        row_saw_amp.addWidget(QLabel("Амплитуда:"))
+        self.spin_saw_amp = QDoubleSpinBox()
+        self.spin_saw_amp.setRange(0.001, 10000.0)
+        self.spin_saw_amp.setValue(1.0)
+        self.spin_saw_amp.setDecimals(3)
+        self.spin_saw_amp.setSingleStep(0.1)
+        row_saw_amp.addWidget(self.spin_saw_amp)
+        sw_layout.addLayout(row_saw_amp)
+
+        row_saw_phase = QHBoxLayout()
+        row_saw_phase.addWidget(QLabel("Фаза, °:"))
+        self.spin_saw_phase = QDoubleSpinBox()
+        self.spin_saw_phase.setRange(-360.0, 360.0)
+        self.spin_saw_phase.setValue(0.0)
+        self.spin_saw_phase.setDecimals(1)
+        self.spin_saw_phase.setSingleStep(15.0)
+        row_saw_phase.addWidget(self.spin_saw_phase)
+        sw_layout.addLayout(row_saw_phase)
+
+        layout.addWidget(self.sawtooth_group)
+
         # === Параметры для гауссова импульса ===
         self.gauss_group = QWidget()
         gg_layout = QVBoxLayout(self.gauss_group)
         gg_layout.setContentsMargins(0, 0, 0, 0)
+
+        row_gcenter = QHBoxLayout()
+        row_gcenter.addWidget(QLabel("Мат. ожидание (центр), с:"))
+        self.spin_gauss_center = QDoubleSpinBox()
+        self.spin_gauss_center.setRange(-100000.0, 100000.0)
+        self.spin_gauss_center.setValue(0.5)
+        self.spin_gauss_center.setDecimals(4)
+        self.spin_gauss_center.setSingleStep(0.1)
+        row_gcenter.addWidget(self.spin_gauss_center)
+        gg_layout.addLayout(row_gcenter)
 
         row_gamp = QHBoxLayout()
         row_gamp.addWidget(QLabel("Амплитуда:"))
@@ -121,7 +167,7 @@ class SegmentEntryWidget(QGroupBox):
         gg_layout.addLayout(row_gamp)
 
         row_sigma = QHBoxLayout()
-        row_sigma.addWidget(QLabel("Сигма, с:"))
+        row_sigma.addWidget(QLabel("Сигма (σ), с:"))
         self.spin_gauss_sigma = QDoubleSpinBox()
         self.spin_gauss_sigma.setRange(0.001, 100.0)
         self.spin_gauss_sigma.setValue(0.05)
@@ -166,6 +212,16 @@ class SegmentEntryWidget(QGroupBox):
         row_ip.addWidget(self.spin_imp_period)
         ig_layout.addLayout(row_ip)
 
+        row_id = QHBoxLayout()
+        row_id.addWidget(QLabel("Задержка (сдвиг), с:"))
+        self.spin_imp_delay = QDoubleSpinBox()
+        self.spin_imp_delay.setRange(0.0, 100000.0)
+        self.spin_imp_delay.setValue(0.0)
+        self.spin_imp_delay.setDecimals(4)
+        self.spin_imp_delay.setSingleStep(0.01)
+        row_id.addWidget(self.spin_imp_delay)
+        ig_layout.addLayout(row_id)
+
         layout.addWidget(self.impulse_group)
 
         # === Параметры для экспоненциального ===
@@ -191,6 +247,16 @@ class SegmentEntryWidget(QGroupBox):
         self.spin_exp_amp.setDecimals(3)
         row_ea.addWidget(self.spin_exp_amp)
         eg_layout.addLayout(row_ea)
+
+        row_ed = QHBoxLayout()
+        row_ed.addWidget(QLabel("Задержка, с:"))
+        self.spin_exp_delay = QDoubleSpinBox()
+        self.spin_exp_delay.setRange(0.0, 100000.0)
+        self.spin_exp_delay.setValue(0.0)
+        self.spin_exp_delay.setDecimals(4)
+        self.spin_exp_delay.setSingleStep(0.1)
+        row_ed.addWidget(self.spin_exp_delay)
+        eg_layout.addLayout(row_ed)
 
         layout.addWidget(self.exp_group)
 
@@ -233,7 +299,7 @@ class SegmentEntryWidget(QGroupBox):
         layout.addWidget(self.lbl_min_duration)
 
         # Кнопка удаления
-        self.btn_remove = QPushButton("✕ Удалить")
+        self.btn_remove = QPushButton("Удалить")
         self.btn_remove.clicked.connect(lambda: self.removed.emit(self))
         layout.addWidget(self.btn_remove)
 
@@ -242,13 +308,19 @@ class SegmentEntryWidget(QGroupBox):
             self.spin_freq,
             self.spin_amp,
             self.spin_phase,
+            self.spin_saw_freq,
+            self.spin_saw_amp,
+            self.spin_saw_phase,
+            self.spin_gauss_center,
             self.spin_gauss_amp,
             self.spin_gauss_sigma,
             self.spin_imp_width,
             self.spin_imp_amp,
             self.spin_imp_period,
+            self.spin_imp_delay,
             self.spin_exp_alpha,
             self.spin_exp_amp,
+            self.spin_exp_delay,
             self.spin_speech_amp,
         ]:
             spin.valueChanged.connect(self._update_min_duration_label)
@@ -284,13 +356,8 @@ class SegmentEntryWidget(QGroupBox):
         """Показываем/скрываем группы параметров."""
         sig_type = SEGMENT_TYPE_MAP.get(index, SignalType.HARMONIC)
 
-        is_harmonic_like = sig_type in (SignalType.HARMONIC, SignalType.SAWTOOTH)
-        self.harmonic_group.setVisible(is_harmonic_like)
-
-        is_harmonic = sig_type == SignalType.HARMONIC
-        self.spin_phase.setVisible(is_harmonic)
-        self.lbl_phase.setVisible(is_harmonic)
-
+        self.harmonic_group.setVisible(sig_type == SignalType.HARMONIC)
+        self.sawtooth_group.setVisible(sig_type == SignalType.SAWTOOTH)
         self.gauss_group.setVisible(sig_type == SignalType.GAUSSIAN)
         self.impulse_group.setVisible(sig_type == SignalType.IMPULSE)
         self.exp_group.setVisible(sig_type == SignalType.EXPONENTIAL_IMPULSE)
@@ -308,19 +375,33 @@ class SegmentEntryWidget(QGroupBox):
         idx = self.combo_type.currentIndex()
         sig_type = SEGMENT_TYPE_MAP.get(idx, SignalType.HARMONIC)
 
+        # Для пилообразного используем отдельные спинбоксы
+        if sig_type == SignalType.SAWTOOTH:
+            freq = self.spin_saw_freq.value()
+            amp = self.spin_saw_amp.value()
+            saw_phase = self.spin_saw_phase.value()
+        else:
+            freq = self.spin_freq.value()
+            amp = self.spin_amp.value()
+            saw_phase = 0.0
+
         return SegmentPoolEntry(
             signal_type=sig_type,
             enabled=self.cb_enabled.isChecked(),
-            freq=self.spin_freq.value(),
-            amp=self.spin_amp.value(),
+            freq=freq,
+            amp=amp,
             phase_deg=self.spin_phase.value(),
+            saw_phase_deg=saw_phase,
             gauss_amp=self.spin_gauss_amp.value(),
             gauss_sigma=self.spin_gauss_sigma.value(),
+            gauss_center=self.spin_gauss_center.value(),
             impulse_width=self.spin_imp_width.value(),
             impulse_amp=self.spin_imp_amp.value(),
             impulse_period=self.spin_imp_period.value(),
+            impulse_delay=self.spin_imp_delay.value(),
             exp_alpha=self.spin_exp_alpha.value(),
             exp_amp=self.spin_exp_amp.value(),
+            exp_delay=self.spin_exp_delay.value(),
             speech_file=self.ed_speech_file.text(),
             speech_amp=self.spin_speech_amp.value(),
         )
@@ -385,7 +466,7 @@ class SegmentedPanel(QGroupBox):
         seg_layout.addLayout(row_max)
 
         self.lbl_info = QLabel(
-            "⚠ Мин. длительность будет автоматически увеличена\n"
+            "Мин. длительность будет автоматически увеличена\n"
             "для сегментов, которым нужен полный период."
         )
         self.lbl_info.setStyleSheet("color: #888; font-size: 10px;")
@@ -424,7 +505,7 @@ class SegmentedPanel(QGroupBox):
         main_layout.addWidget(pool_group)
 
         # ── Кнопка генерации ──
-        self.btn_generate = QPushButton("🎲 Сгенерировать сигнал")
+        self.btn_generate = QPushButton("Сгенерировать сигнал")
         self.btn_generate.setStyleSheet(
             "QPushButton { background-color: #4CAF50; color: white; "
             "font-weight: bold; padding: 8px; font-size: 13px; }"

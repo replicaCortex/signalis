@@ -1,4 +1,3 @@
-# src/widgets/plot_panel.py
 import numpy as np
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
@@ -220,29 +219,29 @@ class PlotPanel(QWidget):
         ax.grid(True)
         self.tab_phase_psd.refresh()
 
-    def _draw_segment_boundaries(self, ax, data, params):
+    def _draw_segment_boundaries(self, ax, data, params, x_axis):
+        """Рисует границы сегментов. x_axis — массив значений оси X."""
         if not data.segment_boundaries:
             return
 
-        dt = params.dt
         drawn_labels = set()
 
         for (start, end), label in zip(data.segment_boundaries, data.segment_labels):
-            t_start = start * dt
-            t_end = end * dt
+            x_start = x_axis[start] if start < len(x_axis) else x_axis[-1]
+            x_end = x_axis[min(end, len(x_axis) - 1)]
             color = SEGMENT_COLORS.get(label, "#999999")
 
             show_label = label not in drawn_labels
             ax.axvspan(
-                t_start,
-                t_end,
+                x_start,
+                x_end,
                 alpha=0.12,
                 color=color,
                 label=f"Сегмент: {label}" if show_label else None,
             )
             drawn_labels.add(label)
 
-            ax.axvline(t_start, color=color, linestyle="--", linewidth=0.5, alpha=0.5)
+            ax.axvline(x_start, color=color, linestyle="--", linewidth=0.5, alpha=0.5)
 
     def update_plots(
         self,
@@ -260,9 +259,17 @@ class PlotPanel(QWidget):
         self._last_show_filter = show_filter
         self._last_label = signal_label
 
-        time = np.arange(n) * params.dt
         freq = np.arange(n) * params.df
         bar_w = 0.8 * params.df
+
+        # Определяем ось X для графика сигнала
+        if data.x_axis_mode == "sigma" and data.gauss_sigma > 0:
+            time = np.arange(n) * params.dt
+            x_axis = (time - data.gauss_center) / data.gauss_sigma
+            x_label = "σ (отклонение от мат. ожидания)"
+        else:
+            x_axis = np.arange(n) * params.dt
+            x_label = "Время, с"
 
         ax = self.tab_signals.ax
         ax.clear()
@@ -276,11 +283,11 @@ class PlotPanel(QWidget):
         ]
         for cb, sig, label in traces:
             if cb.isChecked() and len(sig) == n:
-                ax.plot(time, sig, label=label)
+                ax.plot(x_axis, sig, label=label)
 
-        self._draw_segment_boundaries(ax, data, params)
+        self._draw_segment_boundaries(ax, data, params, x_axis)
 
-        ax.set(xlabel="Время, с", ylabel="Амплитуда")
+        ax.set(xlabel=x_label, ylabel="Амплитуда")
         ax.legend(fontsize=7, loc="upper right")
         ax.grid(True)
         self.tab_signals.refresh()

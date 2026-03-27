@@ -1,4 +1,3 @@
-# src/main_window.py
 from PyQt5.QtWidgets import QHBoxLayout, QMainWindow, QTabWidget, QWidget
 
 from app import (
@@ -34,7 +33,7 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central)
         layout = QHBoxLayout(central)
 
-        # Левая часть: вкладки
+        # Левая часть
         self.left_tabs = QTabWidget()
 
         self.segmented_panel = SegmentedPanel()
@@ -47,7 +46,7 @@ class MainWindow(QMainWindow):
         self.left_tabs.addTab(self.statistics_panel, "Характеристики")
         self.left_tabs.addTab(self.theory_panel, "Теория")
 
-        # Правая часть: графики
+        # Правая часть
         self.plot_panel = PlotPanel()
 
         layout.addWidget(self.left_tabs, stretch=1)
@@ -134,7 +133,6 @@ class MainWindow(QMainWindow):
             )
             return
 
-        # Выбор сигнала по индексу
         signal_map = {
             0: self.data.base,
             1: self.data.combined,

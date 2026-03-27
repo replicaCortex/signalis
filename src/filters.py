@@ -1,4 +1,3 @@
-# src/filters.py
 from enum import IntEnum
 
 import numpy as np
@@ -17,7 +16,6 @@ class FilterType(IntEnum):
 def get_coefficients(
     ft: FilterType, r: float, fc: float, fd: float
 ) -> tuple[float, float, float, float, float]:
-    """Коэффициенты фильтра (a0, a1, a2, b1, b2)."""
     wc = 2 * np.pi * fc / fd
 
     match ft:
