@@ -111,6 +111,7 @@ class MainWindow(QMainWindow):
                 seg_min_duration=sp.get_seg_min_duration(),
                 seg_max_duration=sp.get_seg_max_duration(),
                 colored_noise_entries=colored_entries,
+                min_periods=sp.get_min_periods(),  # НОВОЕ
             )
 
         self._refresh_plots()

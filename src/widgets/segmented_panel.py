@@ -10,6 +10,7 @@ from PyQt5.QtWidgets import (
     QLineEdit,
     QPushButton,
     QScrollArea,
+    QSpinBox,
     QVBoxLayout,
     QWidget,
 )
@@ -25,6 +26,7 @@ SEGMENT_TYPE_NAMES = [
     "Импульсный",
     "Экспоненциальный",
     "Речевой сигнал",
+    "Амплитудная модуляция",
 ]
 
 SEGMENT_TYPE_MAP = {
@@ -34,6 +36,7 @@ SEGMENT_TYPE_MAP = {
     3: SignalType.IMPULSE,
     4: SignalType.EXPONENTIAL_IMPULSE,
     5: SignalType.SPEECH,
+    6: SignalType.AM_MODULATED,
 }
 
 
@@ -293,6 +296,52 @@ class SegmentEntryWidget(QGroupBox):
 
         layout.addWidget(self.speech_group)
 
+        self.am_group = QWidget()
+        am_layout = QVBoxLayout(self.am_group)
+        am_layout.setContentsMargins(0, 0, 0, 0)
+
+        row_am_cf = QHBoxLayout()
+        row_am_cf.addWidget(QLabel("Несущая частота, Гц:"))
+        self.spin_am_carrier_freq = QDoubleSpinBox()
+        self.spin_am_carrier_freq.setRange(0.1, 50000.0)
+        self.spin_am_carrier_freq.setValue(50.0)
+        self.spin_am_carrier_freq.setDecimals(2)
+        self.spin_am_carrier_freq.setSingleStep(10.0)
+        row_am_cf.addWidget(self.spin_am_carrier_freq)
+        am_layout.addLayout(row_am_cf)
+
+        row_am_ca = QHBoxLayout()
+        row_am_ca.addWidget(QLabel("Амплитуда несущей:"))
+        self.spin_am_carrier_amp = QDoubleSpinBox()
+        self.spin_am_carrier_amp.setRange(0.001, 10000.0)
+        self.spin_am_carrier_amp.setValue(1.0)
+        self.spin_am_carrier_amp.setDecimals(3)
+        self.spin_am_carrier_amp.setSingleStep(0.1)
+        row_am_ca.addWidget(self.spin_am_carrier_amp)
+        am_layout.addLayout(row_am_ca)
+
+        row_am_mf = QHBoxLayout()
+        row_am_mf.addWidget(QLabel("Частота модуляции, Гц:"))
+        self.spin_am_mod_freq = QDoubleSpinBox()
+        self.spin_am_mod_freq.setRange(0.1, 1000.0)
+        self.spin_am_mod_freq.setValue(5.0)
+        self.spin_am_mod_freq.setDecimals(2)
+        self.spin_am_mod_freq.setSingleStep(1.0)
+        row_am_mf.addWidget(self.spin_am_mod_freq)
+        am_layout.addLayout(row_am_mf)
+
+        row_am_md = QHBoxLayout()
+        row_am_md.addWidget(QLabel("Глубина модуляции:"))
+        self.spin_am_mod_depth = QDoubleSpinBox()
+        self.spin_am_mod_depth.setRange(0.0, 1.0)
+        self.spin_am_mod_depth.setValue(0.8)
+        self.spin_am_mod_depth.setDecimals(2)
+        self.spin_am_mod_depth.setSingleStep(0.1)
+        row_am_md.addWidget(self.spin_am_mod_depth)
+        am_layout.addLayout(row_am_md)
+
+        layout.addWidget(self.am_group)
+
         # Метка минимальной длительности
         self.lbl_min_duration = QLabel("Мин. длительность: —")
         self.lbl_min_duration.setStyleSheet("color: #666; font-style: italic;")
@@ -322,6 +371,10 @@ class SegmentEntryWidget(QGroupBox):
             self.spin_exp_amp,
             self.spin_exp_delay,
             self.spin_speech_amp,
+            self.spin_am_carrier_freq,  # НОВОЕ
+            self.spin_am_carrier_amp,
+            self.spin_am_mod_freq,
+            self.spin_am_mod_depth,
         ]:
             spin.valueChanged.connect(self._update_min_duration_label)
 
@@ -362,6 +415,7 @@ class SegmentEntryWidget(QGroupBox):
         self.impulse_group.setVisible(sig_type == SignalType.IMPULSE)
         self.exp_group.setVisible(sig_type == SignalType.EXPONENTIAL_IMPULSE)
         self.speech_group.setVisible(sig_type == SignalType.SPEECH)
+        self.am_group.setVisible(sig_type == SignalType.AM_MODULATED)
 
         self._update_min_duration_label()
         self.changed.emit()
@@ -404,6 +458,10 @@ class SegmentEntryWidget(QGroupBox):
             exp_delay=self.spin_exp_delay.value(),
             speech_file=self.ed_speech_file.text(),
             speech_amp=self.spin_speech_amp.value(),
+            am_carrier_freq=self.spin_am_carrier_freq.value(),
+            am_carrier_amp=self.spin_am_carrier_amp.value(),
+            am_mod_freq=self.spin_am_mod_freq.value(),
+            am_mod_depth=self.spin_am_mod_depth.value(),
         )
 
     def set_index(self, idx: int):
@@ -464,6 +522,14 @@ class SegmentedPanel(QGroupBox):
         self.spin_seg_max.setSingleStep(0.05)
         row_max.addWidget(self.spin_seg_max)
         seg_layout.addLayout(row_max)
+
+        row_periods = QHBoxLayout()
+        row_periods.addWidget(QLabel("Мин. периодов в сегменте:"))
+        self.spin_min_periods = QSpinBox()
+        self.spin_min_periods.setRange(1, 100)
+        self.spin_min_periods.setValue(2)  # НОВОЕ: по умолчанию 2 периода
+        row_periods.addWidget(self.spin_min_periods)
+        seg_layout.addLayout(row_periods)
 
         self.lbl_info = QLabel(
             "Мин. длительность будет автоматически увеличена\n"
@@ -527,6 +593,9 @@ class SegmentedPanel(QGroupBox):
         self._entries.append(entry)
         self._pool_layout.insertWidget(self._pool_layout.count() - 1, entry)
         return entry
+
+    def get_min_periods(self) -> int:
+        return self.spin_min_periods.value()
 
     def _remove_entry(self, entry: SegmentEntryWidget):
         if entry in self._entries:

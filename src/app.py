@@ -9,6 +9,7 @@ from dsp import (
     compute_dft,
     compute_fft,
     compute_psd,
+    generate_amplitude_modulated,
     generate_colored_noise,
     generate_exponential_impulse,
     generate_gaussian,
@@ -137,6 +138,7 @@ class SignalData:
 # ── Сегментированный сигнал ──
 
 
+# Обновить SegmentPoolEntry
 @dataclass
 class SegmentPoolEntry:
     """Один элемент пула сегментов."""
@@ -172,6 +174,12 @@ class SegmentPoolEntry:
     speech_file: str = ""
     speech_amp: float = 1.0
 
+    # НОВОЕ: Амплитудная модуляция
+    am_carrier_freq: float = 50.0
+    am_carrier_amp: float = 1.0
+    am_mod_freq: float = 5.0
+    am_mod_depth: float = 0.8
+
     def min_duration_for_one_period(self) -> float:
         """Минимальная длительность сегмента для одного полного периода."""
         match self.signal_type:
@@ -195,6 +203,11 @@ class SegmentPoolEntry:
                 return 0.1
             case SignalType.SPEECH:
                 return 0.01
+            case SignalType.AM_MODULATED:  # НОВОЕ
+                # Период модулирующего сигнала
+                if self.am_mod_freq > 0:
+                    return 1.0 / self.am_mod_freq
+                return 0.1
         return 0.01
 
 
@@ -242,7 +255,139 @@ def _generate_segment_signal(
                 signal = load_speech_signal(entry.speech_file, n_samples, target_sr)
                 return signal * entry.speech_amp
             return np.zeros(n_samples)
+        case SignalType.AM_MODULATED:  # НОВОЕ
+            return generate_amplitude_modulated(
+                n_samples,
+                dt,
+                entry.am_carrier_freq,
+                entry.am_carrier_amp,
+                entry.am_mod_freq,
+                entry.am_mod_depth,
+            )
     return np.zeros(n_samples)
+
+
+def generate_segmented_signal(
+    params: SignalParams,
+    pool: list[SegmentPoolEntry],
+    seg_min_duration: float = 0.05,
+    seg_max_duration: float = 0.3,
+    colored_noise_entries: list[ColoredNoiseEntry] | None = None,
+    min_periods: int = 2,  # НОВОЕ: минимум периодов в сегменте
+) -> SignalData:
+    """Генерирует сигнал из случайно расположенных сегментов."""
+    dt = params.dt
+    total_n = params.n_samples
+    data = SignalData()
+    data.allocate(total_n)
+    data.x_axis_mode = "time"
+
+    enabled_pool = [e for e in pool if e.enabled]
+    if not enabled_pool:
+        data.statistics = compute_statistics(data.combined, dt)
+        return data
+
+    rng = np.random.default_rng()
+
+    result = np.zeros(total_n)
+    boundaries = []
+    labels = []
+
+    type_names = {
+        SignalType.HARMONIC: "Гарм",
+        SignalType.GAUSSIAN: "Гаусс",
+        SignalType.SAWTOOTH: "Пила",
+        SignalType.IMPULSE: "Импульс",
+        SignalType.EXPONENTIAL_IMPULSE: "Эксп",
+        SignalType.SPEECH: "Речь",
+        SignalType.AM_MODULATED: "АМ",  # НОВОЕ
+    }
+
+    pos = 0
+
+    while pos < total_n:
+        remaining_time = (total_n - pos) * dt
+
+        indices = list(range(len(enabled_pool)))
+        rng.shuffle(indices)
+
+        placed = False
+        for idx in indices:
+            entry = enabled_pool[idx]
+
+            # НОВОЕ: кратность периодам
+            min_period = entry.min_duration_for_one_period()
+            effective_min = max(seg_min_duration, min_period * min_periods)
+            effective_max = max(seg_max_duration, effective_min)
+
+            if remaining_time < effective_min:
+                continue
+
+            actual_max = min(effective_max, remaining_time)
+            actual_min = effective_min
+
+            if actual_min > actual_max:
+                continue
+
+            seg_duration = rng.uniform(actual_min, actual_max)
+
+            # НОВОЕ: округлить до кратного периоду
+            if min_period > 0:
+                num_periods = max(min_periods, int(np.round(seg_duration / min_period)))
+                seg_duration = num_periods * min_period
+
+            seg_n = int(round(seg_duration / dt))
+
+            min_samples = max(1, int(np.ceil(effective_min / dt)))
+            seg_n = max(seg_n, min_samples)
+
+            if pos + seg_n > total_n:
+                seg_n = total_n - pos
+
+            if seg_n < min_samples:
+                continue
+
+            if seg_n <= 0:
+                continue
+
+            seg_signal = _generate_segment_signal(entry, seg_n, dt)
+
+            # НОВОЕ: убрать зануление (плавное затухание на краях)
+            fade_len = max(1, min(seg_n // 20, int(0.01 / dt)))  # ~10мс
+            if seg_n > fade_len * 2:
+                fade_in = np.linspace(0, 1, fade_len)
+                fade_out = np.linspace(1, 0, fade_len)
+                seg_signal[:fade_len] *= fade_in
+                seg_signal[-fade_len:] *= fade_out
+
+            result[pos : pos + seg_n] = seg_signal  # ИЗМЕНЕНО: убрано +=
+
+            # НОВОЕ: цвет в зависимости от частоты для одного типа
+            label_base = type_names.get(entry.signal_type, "?")
+            if entry.signal_type == SignalType.HARMONIC:
+                label = f"{label_base}_{entry.freq:.1f}Гц"
+            elif entry.signal_type == SignalType.SAWTOOTH:
+                label = f"{label_base}_{entry.freq:.1f}Гц"
+            elif entry.signal_type == SignalType.AM_MODULATED:
+                label = f"{label_base}_{entry.am_carrier_freq:.0f}/{entry.am_mod_freq:.1f}Гц"
+            else:
+                label = label_base
+
+            boundaries.append((pos, pos + seg_n))
+            labels.append(label)
+
+            pos += seg_n
+            placed = True
+            break
+
+        if not placed:
+            break
+
+    data.base = result
+    data.segment_boundaries = boundaries
+    data.segment_labels = labels
+
+    return _finalize_signal_data(data, dt, colored_noise_entries)
 
 
 def _build_colored_noise(
@@ -316,107 +461,107 @@ def generate_single_type_signal(
     return _finalize_signal_data(data, dt, colored_noise_entries)
 
 
-def generate_segmented_signal(
-    params: SignalParams,
-    pool: list[SegmentPoolEntry],
-    seg_min_duration: float = 0.05,
-    seg_max_duration: float = 0.3,
-    colored_noise_entries: list[ColoredNoiseEntry] | None = None,
-) -> SignalData:
-    """Генерирует сигнал из случайно расположенных сегментов."""
-    dt = params.dt
-    total_n = params.n_samples
-    data = SignalData()
-    data.allocate(total_n)
-    data.x_axis_mode = "time"
-
-    enabled_pool = [e for e in pool if e.enabled]
-    if not enabled_pool:
-        data.statistics = compute_statistics(data.combined, dt)
-        return data
-
-    rng = np.random.default_rng()
-
-    result = np.zeros(total_n)
-    boundaries = []
-    labels = []
-
-    type_names = {
-        SignalType.HARMONIC: "Гарм",
-        SignalType.GAUSSIAN: "Гаусс",
-        SignalType.SAWTOOTH: "Пила",
-        SignalType.IMPULSE: "Импульс",
-        SignalType.EXPONENTIAL_IMPULSE: "Эксп",
-        SignalType.SPEECH: "Речь",
-    }
-
-    pos = 0
-
-    while pos < total_n:
-        remaining_time = (total_n - pos) * dt
-
-        indices = list(range(len(enabled_pool)))
-        rng.shuffle(indices)
-
-        placed = False
-        for idx in indices:
-            entry = enabled_pool[idx]
-
-            min_period = entry.min_duration_for_one_period()
-            effective_min = max(seg_min_duration, min_period)
-            effective_max = max(seg_max_duration, effective_min)
-
-            if remaining_time < effective_min:
-                continue
-
-            actual_max = min(effective_max, remaining_time)
-            actual_min = effective_min
-
-            if actual_min > actual_max:
-                continue
-
-            seg_duration = rng.uniform(actual_min, actual_max)
-            seg_n = int(round(seg_duration / dt))
-
-            min_samples = max(1, int(np.ceil(effective_min / dt)))
-            seg_n = max(seg_n, min_samples)
-
-            if pos + seg_n > total_n:
-                seg_n = total_n - pos
-
-            if seg_n < min_samples:
-                continue
-
-            if seg_n <= 0:
-                continue
-
-            seg_signal = _generate_segment_signal(entry, seg_n, dt)
-
-            fade_len = max(1, seg_n // 20)
-            if seg_n > fade_len * 2:
-                fade_in = np.linspace(0, 1, fade_len)
-                fade_out = np.linspace(1, 0, fade_len)
-                seg_signal[:fade_len] *= fade_in
-                seg_signal[-fade_len:] *= fade_out
-
-            result[pos : pos + seg_n] += seg_signal
-
-            label = type_names.get(entry.signal_type, "?")
-            boundaries.append((pos, pos + seg_n))
-            labels.append(label)
-
-            pos += seg_n
-            placed = True
-            break
-
-        if not placed:
-            break
-
-    data.base = result
-    data.segment_boundaries = boundaries
-    data.segment_labels = labels
-
-    return _finalize_signal_data(data, dt, colored_noise_entries)
+# def generate_segmented_signal(
+#     params: SignalParams,
+#     pool: list[SegmentPoolEntry],
+#     seg_min_duration: float = 0.05,
+#     seg_max_duration: float = 0.3,
+#     colored_noise_entries: list[ColoredNoiseEntry] | None = None,
+# ) -> SignalData:
+#     """Генерирует сигнал из случайно расположенных сегментов."""
+#     dt = params.dt
+#     total_n = params.n_samples
+#     data = SignalData()
+#     data.allocate(total_n)
+#     data.x_axis_mode = "time"
+#
+#     enabled_pool = [e for e in pool if e.enabled]
+#     if not enabled_pool:
+#         data.statistics = compute_statistics(data.combined, dt)
+#         return data
+#
+#     rng = np.random.default_rng()
+#
+#     result = np.zeros(total_n)
+#     boundaries = []
+#     labels = []
+#
+#     type_names = {
+#         SignalType.HARMONIC: "Гарм",
+#         SignalType.GAUSSIAN: "Гаусс",
+#         SignalType.SAWTOOTH: "Пила",
+#         SignalType.IMPULSE: "Импульс",
+#         SignalType.EXPONENTIAL_IMPULSE: "Эксп",
+#         SignalType.SPEECH: "Речь",
+#     }
+#
+#     pos = 0
+#
+#     while pos < total_n:
+#         remaining_time = (total_n - pos) * dt
+#
+#         indices = list(range(len(enabled_pool)))
+#         rng.shuffle(indices)
+#
+#         placed = False
+#         for idx in indices:
+#             entry = enabled_pool[idx]
+#
+#             min_period = entry.min_duration_for_one_period()
+#             effective_min = max(seg_min_duration, min_period)
+#             effective_max = max(seg_max_duration, effective_min)
+#
+#             if remaining_time < effective_min:
+#                 continue
+#
+#             actual_max = min(effective_max, remaining_time)
+#             actual_min = effective_min
+#
+#             if actual_min > actual_max:
+#                 continue
+#
+#             seg_duration = rng.uniform(actual_min, actual_max)
+#             seg_n = int(round(seg_duration / dt))
+#
+#             min_samples = max(1, int(np.ceil(effective_min / dt)))
+#             seg_n = max(seg_n, min_samples)
+#
+#             if pos + seg_n > total_n:
+#                 seg_n = total_n - pos
+#
+#             if seg_n < min_samples:
+#                 continue
+#
+#             if seg_n <= 0:
+#                 continue
+#
+#             seg_signal = _generate_segment_signal(entry, seg_n, dt)
+#
+#             fade_len = max(1, seg_n // 20)
+#             if seg_n > fade_len * 2:
+#                 fade_in = np.linspace(0, 1, fade_len)
+#                 fade_out = np.linspace(1, 0, fade_len)
+#                 seg_signal[:fade_len] *= fade_in
+#                 seg_signal[-fade_len:] *= fade_out
+#
+#             result[pos : pos + seg_n] += seg_signal
+#
+#             label = type_names.get(entry.signal_type, "?")
+#             boundaries.append((pos, pos + seg_n))
+#             labels.append(label)
+#
+#             pos += seg_n
+#             placed = True
+#             break
+#
+#         if not placed:
+#             break
+#
+#     data.base = result
+#     data.segment_boundaries = boundaries
+#     data.segment_labels = labels
+#
+#     return _finalize_signal_data(data, dt, colored_noise_entries)
 
 
 def export_signal_to_wav(

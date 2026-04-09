@@ -10,6 +10,7 @@ class SignalType(IntEnum):
     IMPULSE = 3
     EXPONENTIAL_IMPULSE = 4
     SPEECH = 5
+    AM_MODULATED = 6
 
 
 class NoiseType(IntEnum):
@@ -386,3 +387,30 @@ def compute_acf(
     acf = acf / acf[0] if acf[0] != 0 else acf
 
     return acf
+
+
+# Добавить в конец файла
+
+
+def generate_amplitude_modulated(
+    n: int,
+    dt: float,
+    carrier_freq: float,
+    carrier_amp: float,
+    mod_freq: float,
+    mod_depth: float,
+) -> np.ndarray:
+    """
+    Генерирует амплитудно-модулированный сигнал.
+
+    x(t) = A·(1 + m·cos(2π·f_m·t))·cos(2π·f_c·t)
+
+    carrier_freq — несущая частота (Гц)
+    carrier_amp — амплитуда несущей
+    mod_freq — частота модуляции (Гц)
+    mod_depth — глубина модуляции (0..1)
+    """
+    t = np.arange(n) * dt
+    modulation = 1.0 + mod_depth * np.cos(2 * np.pi * mod_freq * t)
+    carrier = np.cos(2 * np.pi * carrier_freq * t)
+    return carrier_amp * modulation * carrier

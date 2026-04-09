@@ -98,6 +98,7 @@ SEGMENT_COLORS = {
     "Импульс": "#d62728",
     "Эксп": "#9467bd",
     "Речь": "#8c564b",
+    "АМ": "#e377c2",
 }
 
 
@@ -128,6 +129,7 @@ class PlotPanel(QWidget):
 
         self.tabs = QTabWidget()
 
+        self.tab_noise = PlotTab()
         self.tab_signals = PlotTab()
         self.tab_spectrum = SpectrumTab()
         self.tab_phase_psd = PhasePsdTab()
@@ -139,6 +141,7 @@ class PlotPanel(QWidget):
         self.tabs.addTab(self.tab_phase_psd, "Фаза / СПМ")
         self.tabs.addTab(self.tab_acf, "АКФ")
         self.tabs.addTab(self.tab_freq_resp, "АЧХ фильтра")
+        self.tabs.addTab(self.tab_noise, "Шум")
 
         layout.addWidget(self.tabs)
 
@@ -226,10 +229,28 @@ class PlotPanel(QWidget):
 
         drawn_labels = set()
 
+        import matplotlib.cm as cm
+
+        unique_labels = list(set(data.segment_labels))
+        color_map = {}
+
+        for i, label in enumerate(unique_labels):
+            base_type = label.split("_")[0]
+            if base_type in SEGMENT_COLORS:
+                base_color = SEGMENT_COLORS[base_type]
+                # Варьируем оттенок для разных частот
+                import matplotlib.colors as mcolors
+
+                rgb = mcolors.to_rgb(base_color)
+                hue_shift = (i % 5) * 0.05  # Небольшой сдвиг оттенка
+                color_map[label] = tuple(min(1.0, c + hue_shift) for c in rgb)
+            else:
+                color_map[label] = cm.tab20(i % 20)[:3]
+
         for (start, end), label in zip(data.segment_boundaries, data.segment_labels):
             x_start = x_axis[start] if start < len(x_axis) else x_axis[-1]
             x_end = x_axis[min(end, len(x_axis) - 1)]
-            color = SEGMENT_COLORS.get(label, "#999999")
+            color = color_map.get(label, "#999999")
 
             show_label = label not in drawn_labels
             ax.axvspan(
@@ -237,7 +258,7 @@ class PlotPanel(QWidget):
                 x_end,
                 alpha=0.12,
                 color=color,
-                label=f"Сегмент: {label}" if show_label else None,
+                label=f"{label}" if show_label else None,
             )
             drawn_labels.add(label)
 
@@ -312,3 +333,12 @@ class PlotPanel(QWidget):
             ax.set(xlabel="Частота, Гц", ylabel="Коэффициент передачи")
             ax.grid(True)
         self.tab_freq_resp.refresh()
+
+        ax_noise = self.tab_noise.ax
+        ax_noise.clear()
+        if len(data.colored_noise) == data.n and np.any(data.colored_noise):
+            ax_noise.plot(x_axis, data.colored_noise, label="Цветной шум", alpha=0.7)
+            ax_noise.set(xlabel=x_label, ylabel="Амплитуда")
+            ax_noise.legend()
+            ax_noise.grid(True)
+        self.tab_noise.refresh()
