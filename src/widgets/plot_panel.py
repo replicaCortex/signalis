@@ -136,6 +136,7 @@ class PlotPanel(QWidget):
         self.tab_phase_psd = PhasePsdTab()
         self.tab_acf = PlotTab()
         self.tab_freq_resp = PlotTab()
+        self.tab_classification = ClassificationTab()
 
         self.tabs.addTab(self.tab_signals, "Сигналы")
         self.tabs.addTab(self.tab_spectrum, "Амплитудный спектр")
@@ -143,7 +144,7 @@ class PlotPanel(QWidget):
         self.tabs.addTab(self.tab_acf, "АКФ")
         self.tabs.addTab(self.tab_freq_resp, "АЧХ фильтра")
         self.tabs.addTab(self.tab_noise, "Шум")
-        self.tabs.addTab(self.tab_confidence, "Классификация")
+        self.tabs.addTab(self.tab_classification, "Классификация")
 
         layout.addWidget(self.tabs)
 
@@ -357,7 +358,19 @@ class PlotPanel(QWidget):
             )
         else:
             self.tab_confidence.clear()
-        self.tab_confidence.refresh()
+
+        if data.classification_confidences:
+            self.tab_classification.plot_classification(
+                data.combined,
+                data.classification_boundaries,
+                data.classification_labels,
+                data.classification_confidences,
+                x_axis,
+                params.dt,
+            )
+        else:
+            self.tab_classification.clear()
+        self.tab_classification.refresh()
 
 
 class ConfidencePlotTab(QWidget):
@@ -499,6 +512,192 @@ class ConfidencePlotTab(QWidget):
 
     def clear(self):
         self.ax.clear()
+
+    def refresh(self):
+        self.canvas.draw()
+
+
+class ClassificationTab(QWidget):
+    """Вкладка для отображения классификации с сигналом и уверенностью."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+        # Создаем фигуру с двумя подграфиками
+        self.figure = Figure(tight_layout=True)
+        self.canvas = FigureCanvas(self.figure)
+
+        # Два графика: сигнал сверху, уверенность снизу
+        self.ax_signal = self.figure.add_subplot(211)
+        self.ax_confidence = self.figure.add_subplot(212)
+
+        layout = QVBoxLayout(self)
+
+        # Информация о формате
+        info_label = QLabel(
+            "Верхний график: исходный сигнал с цветовой маркировкой классификации.\n"
+            "Нижний график: уверенность классификатора (вероятности от 0 до 1)."
+        )
+        info_label.setStyleSheet("color: #666; font-size: 9px; padding: 3px;")
+        info_label.setWordWrap(True)
+        layout.addWidget(info_label)
+
+        layout.addWidget(self.canvas)
+
+    def plot_classification(self, signal, boundaries, labels, confidences, x_axis, dt):
+        """Рисует сигнал с классификацией и график уверенности."""
+        self.ax_signal.clear()
+        self.ax_confidence.clear()
+
+        if not confidences:
+            self.ax_signal.text(
+                0.5,
+                0.5,
+                "Нет данных классификации",
+                ha="center",
+                va="center",
+                transform=self.ax_signal.transAxes,
+            )
+            self.ax_confidence.text(
+                0.5,
+                0.5,
+                "Нет данных классификации",
+                ha="center",
+                va="center",
+                transform=self.ax_confidence.transAxes,
+            )
+            self.canvas.draw()
+            return
+
+        # === График 1: Сигнал с цветовой разметкой ===
+
+        # Рисуем весь сигнал
+        self.ax_signal.plot(
+            x_axis, signal, color="gray", alpha=0.3, linewidth=0.5, label="Сигнал"
+        )
+
+        # Собираем все уникальные метки
+        all_labels = set()
+        for conf_dict in confidences:
+            all_labels.update(conf_dict.keys())
+        all_labels = sorted(all_labels)
+
+        # Создаем цветовую карту
+        import matplotlib.cm as cm
+
+        n_labels = len(all_labels)
+        if n_labels <= 10:
+            colormap = cm.get_cmap("tab10")
+        elif n_labels <= 20:
+            colormap = cm.get_cmap("tab20")
+        else:
+            colormap = cm.get_cmap("hsv")
+
+        colors = {}
+        for i, label in enumerate(all_labels):
+            if n_labels <= 20:
+                colors[label] = colormap(i)
+            else:
+                colors[label] = colormap(i / n_labels)
+
+        # Рисуем сегменты с цветами по предсказанной метке
+        drawn_labels = set()
+        for (start, end), label in zip(boundaries, labels):
+            x_start = x_axis[start] if start < len(x_axis) else x_axis[-1]
+            x_end = x_axis[min(end, len(x_axis) - 1)]
+
+            color = colors.get(label, "#999999")
+
+            # Закрашиваем фон
+            show_label = label not in drawn_labels
+            self.ax_signal.axvspan(
+                x_start,
+                x_end,
+                alpha=0.15,
+                color=color,
+                label=label if show_label else None,
+            )
+            drawn_labels.add(label)
+
+            # Рисуем сам сигнал в этом сегменте
+            segment_indices = slice(start, min(end, len(signal)))
+            self.ax_signal.plot(
+                x_axis[segment_indices],
+                signal[segment_indices],
+                color=color,
+                linewidth=1.5,
+                alpha=0.8,
+            )
+
+        self.ax_signal.set_ylabel("Амплитуда")
+        self.ax_signal.set_title("Классифицированный сигнал")
+        self.ax_signal.legend(loc="upper right", fontsize=8, framealpha=0.9)
+        self.ax_signal.grid(True, alpha=0.3)
+
+        # === График 2: Уверенность классификации ===
+
+        for i, ((start, end), conf_dict) in enumerate(zip(boundaries, confidences)):
+            center = (start + end) // 2
+            time_center = center * dt
+
+            # Накопленная высота для stacked bar
+            bottom = 0.0
+            for label in all_labels:
+                prob = conf_dict.get(label, 0.0)
+                if prob > 0.001:  # Показываем только значимые вероятности (>0.1%)
+                    width = dt * (end - start) * 0.8
+                    self.ax_confidence.bar(
+                        time_center,
+                        prob,
+                        bottom=bottom,
+                        color=colors[label],
+                        width=width,
+                        alpha=0.8,
+                        edgecolor="white",
+                        linewidth=0.5,
+                    )
+
+                    # Добавляем текст с процентами для значимых вероятностей (>15%)
+                    if prob > 0.15:
+                        text_y = bottom + prob / 2
+                        self.ax_confidence.text(
+                            time_center,
+                            text_y,
+                            f"{prob * 100:.0f}%",
+                            ha="center",
+                            va="center",
+                            fontsize=7,
+                            color="white" if prob > 0.3 else "black",
+                            weight="bold",
+                        )
+
+                    bottom += prob
+
+        self.ax_confidence.set_xlabel("Время, с")
+        self.ax_confidence.set_ylabel("Вероятность")
+        self.ax_confidence.set_title("Уверенность классификации")
+        self.ax_confidence.set_ylim(0, 1.0)
+
+        # Добавляем горизонтальные линии для удобства чтения
+        for y in [0.25, 0.5, 0.75, 1.0]:
+            self.ax_confidence.axhline(
+                y, color="gray", linestyle=":", linewidth=0.5, alpha=0.5
+            )
+
+        # Форматируем ось Y в процентах
+        from matplotlib.ticker import FuncFormatter
+
+        self.ax_confidence.yaxis.set_major_formatter(
+            FuncFormatter(lambda y, _: f"{y * 100:.0f}%")
+        )
+
+        self.ax_confidence.grid(True, alpha=0.3, axis="x")
+
+        self.canvas.draw()
+
+    def clear(self):
+        self.ax_signal.clear()
+        self.ax_confidence.clear()
 
     def refresh(self):
         self.canvas.draw()

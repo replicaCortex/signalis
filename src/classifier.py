@@ -1,7 +1,18 @@
 from dataclasses import dataclass
+from enum import IntEnum
 from typing import Dict, List, Tuple
 
 import numpy as np
+
+
+class ClassificationMethod(IntEnum):
+    """Методы классификации."""
+
+    KMEANS = 0
+    KNN = 1
+    EUCLIDEAN_DISTANCE = 2
+    CORRELATION = 3
+    DTW = 4  # Dynamic Time Warping
 
 
 @dataclass
@@ -14,6 +25,11 @@ class SegmentFeatures:
     peak_amplitude: float
     zero_crossing_rate: float
     energy: float
+    # Дополнительные признаки
+    skewness: float = 0.0
+    kurtosis: float = 0.0
+    spectral_centroid: float = 0.0
+    spectral_bandwidth: float = 0.0
 
 
 def extract_features(signal: np.ndarray, dt: float) -> SegmentFeatures:
@@ -27,18 +43,37 @@ def extract_features(signal: np.ndarray, dt: float) -> SegmentFeatures:
     zero_crossings = np.sum(np.diff(np.sign(signal)) != 0)
     zcr = zero_crossings / len(signal) if len(signal) > 0 else 0.0
 
+    # Асимметрия (skewness) и эксцесс (kurtosis)
+    if std > 0:
+        normalized = (signal - mean) / std
+        skewness = np.mean(normalized**3)
+        kurtosis = np.mean(normalized**4) - 3.0
+    else:
+        skewness = 0.0
+        kurtosis = 0.0
+
     # Спектральные характеристики
     spectrum = np.fft.fft(signal)
     magnitude = np.abs(spectrum[: len(spectrum) // 2])
     freqs = np.fft.fftfreq(len(signal), dt)[: len(spectrum) // 2]
 
-    if len(magnitude) > 0:
+    if len(magnitude) > 0 and np.sum(magnitude) > 0:
         peak_idx = np.argmax(magnitude)
         peak_freq = abs(freqs[peak_idx])
         peak_amplitude = magnitude[peak_idx]
+
+        # Спектральный центроид (центр масс спектра)
+        spectral_centroid = np.sum(freqs * magnitude) / np.sum(magnitude)
+
+        # Спектральная ширина полосы
+        spectral_bandwidth = np.sqrt(
+            np.sum(((freqs - spectral_centroid) ** 2) * magnitude) / np.sum(magnitude)
+        )
     else:
         peak_freq = 0.0
         peak_amplitude = 0.0
+        spectral_centroid = 0.0
+        spectral_bandwidth = 0.0
 
     return SegmentFeatures(
         mean=mean,
@@ -47,6 +82,10 @@ def extract_features(signal: np.ndarray, dt: float) -> SegmentFeatures:
         peak_amplitude=peak_amplitude,
         zero_crossing_rate=zcr,
         energy=energy,
+        skewness=skewness,
+        kurtosis=kurtosis,
+        spectral_centroid=spectral_centroid,
+        spectral_bandwidth=spectral_bandwidth,
     )
 
 
@@ -60,18 +99,38 @@ def features_to_vector(features: SegmentFeatures) -> np.ndarray:
             features.peak_amplitude,
             features.zero_crossing_rate,
             features.energy,
+            features.skewness,
+            features.kurtosis,
+            features.spectral_centroid,
+            features.spectral_bandwidth,
         ]
     )
 
 
 class SignalClassifier:
-    """K-means классификатор сегментов сигнала."""
+    """Универсальный классификатор сегментов сигнала."""
 
-    def __init__(self, n_clusters: int = 5, max_iter: int = 100):
+    def __init__(
+        self,
+        method: ClassificationMethod = ClassificationMethod.KMEANS,
+        n_clusters: int = 5,
+        max_iter: int = 100,
+        k_neighbors: int = 3,
+    ):
+        self.method = method
         self.n_clusters = n_clusters
         self.max_iter = max_iter
+        self.k_neighbors = k_neighbors
+
+        # Для K-means
         self.centroids = None
-        self.labels_map = {}  # кластер -> метка
+        self.labels_map = {}
+
+        # Для KNN и других методов
+        self.reference_features = []
+        self.reference_labels = []
+        self.reference_signals = []  # Для DTW
+
         self.mean = None
         self.std = None
 
@@ -79,19 +138,12 @@ class SignalClassifier:
         """Нормализация признаков."""
         mean = np.mean(X, axis=0)
         std = np.std(X, axis=0)
-        std[std == 0] = 1.0  # избегаем деления на 0
+        std[std == 0] = 1.0
         X_norm = (X - mean) / std
         return X_norm, mean, std
 
-    def fit(self, features_list: List[SegmentFeatures], labels: List[str]):
-        """Обучение на эталонных сегментах."""
-        # Преобразуем признаки в матрицу
-        X = np.array([features_to_vector(f) for f in features_list])
-
-        # Нормализация
-        X_norm, self.mean, self.std = self._normalize(X)
-
-        # K-means
+    def _kmeans_fit(self, X_norm: np.ndarray, labels: List[str]):
+        """K-means кластеризация."""
         n_samples = len(X_norm)
         self.n_clusters = min(self.n_clusters, n_samples)
 
@@ -111,13 +163,11 @@ class SignalClassifier:
 
         # Итеративное уточнение
         for iteration in range(self.max_iter):
-            # Назначение кластеров
             cluster_assignments = []
             for x in X_norm:
                 distances = [np.linalg.norm(x - c) for c in self.centroids]
                 cluster_assignments.append(np.argmin(distances))
 
-            # Обновление центроидов
             new_centroids = []
             for k in range(self.n_clusters):
                 cluster_points = X_norm[np.array(cluster_assignments) == k]
@@ -128,7 +178,6 @@ class SignalClassifier:
 
             new_centroids = np.array(new_centroids)
 
-            # Проверка сходимости
             if np.allclose(self.centroids, new_centroids, atol=1e-6):
                 break
 
@@ -143,96 +192,238 @@ class SignalClassifier:
                 cluster_labels[cluster_id].get(label, 0) + 1
             )
 
-        # Выбираем наиболее частую метку для каждого кластера
         self.labels_map = {}
         for cluster_id, label_counts in cluster_labels.items():
             self.labels_map[cluster_id] = max(label_counts.items(), key=lambda x: x[1])[
                 0
             ]
 
-    def predict_with_confidence(
-        self, features: SegmentFeatures
-    ) -> Tuple[str, Dict[str, float]]:
-        """
-        Классифицирует сегмент и возвращает метку + вероятности для всех классов.
+    def fit(
+        self,
+        features_list: List[SegmentFeatures],
+        labels: List[str],
+        signals: List[np.ndarray] = None,
+    ):
+        """Обучение классификатора."""
+        X = np.array([features_to_vector(f) for f in features_list])
+        X_norm, self.mean, self.std = self._normalize(X)
 
-        Returns:
-            (predicted_label, confidence_dict) где confidence_dict = {label: probability}
-            Сумма всех вероятностей = 1.0
-        """
-        if self.centroids is None:
-            return "Неизвестно", {}
+        # Сохраняем эталонные данные
+        self.reference_features = features_list
+        self.reference_labels = labels
+        if signals is not None:
+            self.reference_signals = signals
 
-        # Нормализация
-        x = features_to_vector(features)
-        x_norm = (x - self.mean) / self.std
+        # Обучаем в зависимости от метода
+        if self.method == ClassificationMethod.KMEANS:
+            self._kmeans_fit(X_norm, labels)
 
-        # Вычисление расстояний до всех центроидов
+    def _predict_kmeans(self, x_norm: np.ndarray) -> Tuple[str, Dict[str, float]]:
+        """Классификация методом K-means."""
         distances = np.array([np.linalg.norm(x_norm - c) for c in self.centroids])
 
-        # ИСПРАВЛЕНО: Преобразуем расстояния в вероятности через softmax
-        # Используем отрицательные расстояния с temperature scaling
-        temperature = 1.0  # Можно настраивать для контроля "уверенности"
-
-        # Вариант 1: Softmax на основе отрицательных расстояний
+        temperature = 1.0
         neg_distances = -distances / temperature
-        # Вычитаем максимум для численной стабильности
         neg_distances_shifted = neg_distances - np.max(neg_distances)
         exp_neg_dist = np.exp(neg_distances_shifted)
         probabilities = exp_neg_dist / np.sum(exp_neg_dist)
 
-        # ПРОВЕРКА: сумма вероятностей должна быть 1.0
-        assert np.isclose(np.sum(probabilities), 1.0), (
-            f"Сумма вероятностей = {np.sum(probabilities)}"
-        )
-
-        # Создаем словарь уверенности по меткам
         confidence_dict = {}
         for cluster_id, prob in enumerate(probabilities):
             label = self.labels_map.get(cluster_id, f"Кластер_{cluster_id}")
-            # Если несколько кластеров имеют одну метку, суммируем их вероятности
             confidence_dict[label] = confidence_dict.get(label, 0.0) + prob
 
-        # ПРОВЕРКА: сумма вероятностей по меткам тоже должна быть 1.0
         total_prob = sum(confidence_dict.values())
         if not np.isclose(total_prob, 1.0):
-            # Нормализуем на всякий случай
             confidence_dict = {k: v / total_prob for k, v in confidence_dict.items()}
 
-        # Предсказанная метка - с максимальной вероятностью
         predicted_label = max(confidence_dict.items(), key=lambda x: x[1])[0]
-
         return predicted_label, confidence_dict
 
+    def _predict_knn(self, x_norm: np.ndarray) -> Tuple[str, Dict[str, float]]:
+        """Классификация методом K-ближайших соседей."""
+        # Вычисляем расстояния до всех эталонов
+        ref_vectors = np.array([features_to_vector(f) for f in self.reference_features])
+        ref_norm = (ref_vectors - self.mean) / self.std
 
-def segment_and_classify(
-    signal: np.ndarray, dt: float, window_size: int, classifier: SignalClassifier
-) -> Tuple[List[Tuple[int, int]], List[str], List[Dict[str, float]]]:
-    """
-    Сегментирует сигнал скользящим окном и классифицирует каждый сегмент.
+        distances = np.array([np.linalg.norm(x_norm - r) for r in ref_norm])
 
-    Returns:
-        (boundaries, labels, confidences)
-    """
-    boundaries = []
-    labels = []
-    confidences = []
+        # Находим K ближайших
+        k = min(self.k_neighbors, len(distances))
+        nearest_indices = np.argsort(distances)[:k]
 
-    n = len(signal)
-    step = window_size // 2  # 50% перекрытие
+        # Голосование с весами (обратные расстояния)
+        votes = {}
+        total_weight = 0.0
 
-    for start in range(0, n - window_size + 1, step):
-        end = start + window_size
-        segment = signal[start:end]
+        for idx in nearest_indices:
+            label = self.reference_labels[idx]
+            dist = distances[idx]
+            weight = 1.0 / (dist + 1e-10)  # Избегаем деления на 0
 
-        # Извлечение признаков
-        features = extract_features(segment, dt)
+            votes[label] = votes.get(label, 0.0) + weight
+            total_weight += weight
 
-        # Классификация
-        label, confidence = classifier.predict_with_confidence(features)
+        # Нормализуем в вероятности
+        confidence_dict = {label: vote / total_weight for label, vote in votes.items()}
 
-        boundaries.append((start, end))
-        labels.append(label)
-        confidences.append(confidence)
+        predicted_label = max(confidence_dict.items(), key=lambda x: x[1])[0]
+        return predicted_label, confidence_dict
 
-    return boundaries, labels, confidences
+    def _predict_euclidean(self, x_norm: np.ndarray) -> Tuple[str, Dict[str, float]]:
+        """Классификация по евклидову расстоянию до ближайшего эталона."""
+        ref_vectors = np.array([features_to_vector(f) for f in self.reference_features])
+        ref_norm = (ref_vectors - self.mean) / self.std
+
+        distances = np.array([np.linalg.norm(x_norm - r) for r in ref_norm])
+
+        # Softmax на основе отрицательных расстояний
+        temperature = 0.5  # Более уверенные предсказания
+        neg_distances = -distances / temperature
+        neg_distances_shifted = neg_distances - np.max(neg_distances)
+        exp_neg_dist = np.exp(neg_distances_shifted)
+        probabilities = exp_neg_dist / np.sum(exp_neg_dist)
+
+        # Группируем по меткам
+        confidence_dict = {}
+        for label, prob in zip(self.reference_labels, probabilities):
+            confidence_dict[label] = confidence_dict.get(label, 0.0) + prob
+
+        # Нормализуем
+        total = sum(confidence_dict.values())
+        confidence_dict = {k: v / total for k, v in confidence_dict.items()}
+
+        predicted_label = max(confidence_dict.items(), key=lambda x: x[1])[0]
+        return predicted_label, confidence_dict
+
+    def _predict_correlation(
+        self, features: SegmentFeatures
+    ) -> Tuple[str, Dict[str, float]]:
+        """Классификация по корреляции признаков."""
+        x = features_to_vector(features)
+
+        correlations = []
+        for ref_feat in self.reference_features:
+            ref_vec = features_to_vector(ref_feat)
+
+            # Нормализуем векторы
+            x_norm_val = x - np.mean(x)
+            ref_norm_val = ref_vec - np.mean(ref_vec)
+
+            x_std = np.std(x)
+            ref_std = np.std(ref_vec)
+
+            if x_std > 0 and ref_std > 0:
+                corr = np.dot(x_norm_val, ref_norm_val) / (len(x) * x_std * ref_std)
+            else:
+                corr = 0.0
+
+            correlations.append(corr)
+
+        # Преобразуем корреляции в вероятности
+        # Корреляция от -1 до 1, приводим к 0..1
+        correlations = np.array(correlations)
+        correlations_pos = (correlations + 1.0) / 2.0  # 0..1
+
+        # Softmax
+        temperature = 0.3
+        scaled = correlations_pos / temperature
+        scaled_shifted = scaled - np.max(scaled)
+        exp_corr = np.exp(scaled_shifted)
+        probabilities = exp_corr / np.sum(exp_corr)
+
+        # Группируем по меткам
+        confidence_dict = {}
+        for label, prob in zip(self.reference_labels, probabilities):
+            confidence_dict[label] = confidence_dict.get(label, 0.0) + prob
+
+        total = sum(confidence_dict.values())
+        confidence_dict = {k: v / total for k, v in confidence_dict.items()}
+
+        predicted_label = max(confidence_dict.items(), key=lambda x: x[1])[0]
+        return predicted_label, confidence_dict
+
+    def _dtw_distance(self, s1: np.ndarray, s2: np.ndarray) -> float:
+        """Dynamic Time Warping расстояние между двумя сигналами."""
+        n, m = len(s1), len(s2)
+
+        # Ограничиваем размер для производительности
+        if n > 1000 or m > 1000:
+            # Downsample
+            factor = max(n // 500, m // 500, 1)
+            s1 = s1[::factor]
+            s2 = s2[::factor]
+            n, m = len(s1), len(s2)
+
+        dtw_matrix = np.full((n + 1, m + 1), np.inf)
+        dtw_matrix[0, 0] = 0
+
+        for i in range(1, n + 1):
+            for j in range(1, m + 1):
+                cost = abs(s1[i - 1] - s2[j - 1])
+                dtw_matrix[i, j] = cost + min(
+                    dtw_matrix[i - 1, j],  # insertion
+                    dtw_matrix[i, j - 1],  # deletion
+                    dtw_matrix[i - 1, j - 1],  # match
+                )
+
+        return dtw_matrix[n, m]
+
+    def _predict_dtw(self, signal: np.ndarray) -> Tuple[str, Dict[str, float]]:
+        """Классификация методом Dynamic Time Warping."""
+        if not self.reference_signals:
+            # Fallback на евклидово расстояние
+            x = features_to_vector(extract_features(signal, 1.0))
+            x_norm = (x - self.mean) / self.std
+            return self._predict_euclidean(x_norm)
+
+        distances = []
+        for ref_signal in self.reference_signals:
+            dist = self._dtw_distance(signal, ref_signal)
+            distances.append(dist)
+
+        distances = np.array(distances)
+
+        # Softmax
+        temperature = np.mean(distances) if np.mean(distances) > 0 else 1.0
+        neg_distances = -distances / temperature
+        neg_distances_shifted = neg_distances - np.max(neg_distances)
+        exp_neg_dist = np.exp(neg_distances_shifted)
+        probabilities = exp_neg_dist / np.sum(exp_neg_dist)
+
+        confidence_dict = {}
+        for label, prob in zip(self.reference_labels, probabilities):
+            confidence_dict[label] = confidence_dict.get(label, 0.0) + prob
+
+        total = sum(confidence_dict.values())
+        confidence_dict = {k: v / total for k, v in confidence_dict.items()}
+
+        predicted_label = max(confidence_dict.items(), key=lambda x: x[1])[0]
+        return predicted_label, confidence_dict
+
+    def predict_with_confidence(
+        self, features: SegmentFeatures, signal: np.ndarray = None
+    ) -> Tuple[str, Dict[str, float]]:
+        """
+        Классифицирует сегмент и возвращает метку + вероятности.
+        """
+        if self.method == ClassificationMethod.DTW:
+            if signal is None:
+                raise ValueError("DTW требует исходный сигнал")
+            return self._predict_dtw(signal)
+
+        if self.method == ClassificationMethod.CORRELATION:
+            return self._predict_correlation(features)
+
+        # Для остальных методов нужна нормализация
+        x = features_to_vector(features)
+        x_norm = (x - self.mean) / self.std
+
+        if self.method == ClassificationMethod.KMEANS:
+            return self._predict_kmeans(x_norm)
+        elif self.method == ClassificationMethod.KNN:
+            return self._predict_knn(x_norm)
+        elif self.method == ClassificationMethod.EUCLIDEAN_DISTANCE:
+            return self._predict_euclidean(x_norm)
+
+        return "Неизвестно", {}

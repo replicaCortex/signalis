@@ -276,7 +276,7 @@ def generate_segmented_signal(
     seg_min_duration: float = 0.05,
     seg_max_duration: float = 0.3,
     colored_noise_entries: list[ColoredNoiseEntry] | None = None,
-    min_periods: int = 2,  # НОВОЕ: минимум периодов в сегменте
+    min_periods: int = 5,  # ИЗМЕНЕНО: увеличено с 2 до 5
 ) -> SignalData:
     """Генерирует сигнал из случайно расположенных сегментов."""
     dt = params.dt
@@ -303,7 +303,7 @@ def generate_segmented_signal(
         SignalType.IMPULSE: "Импульс",
         SignalType.EXPONENTIAL_IMPULSE: "Эксп",
         SignalType.SPEECH: "Речь",
-        SignalType.AM_MODULATED: "АМ",  # НОВОЕ
+        SignalType.AM_MODULATED: "АМ",
     }
 
     pos = 0
@@ -318,10 +318,28 @@ def generate_segmented_signal(
         for idx in indices:
             entry = enabled_pool[idx]
 
-            # НОВОЕ: кратность периодам
+            # Кратность периодам
             min_period = entry.min_duration_for_one_period()
-            effective_min = max(seg_min_duration, min_period * min_periods)
-            effective_max = max(seg_max_duration, effective_min)
+
+            # УЛУЧШЕНО: адаптивное число периодов в зависимости от типа
+            if entry.signal_type in [
+                SignalType.HARMONIC,
+                SignalType.SAWTOOTH,
+                SignalType.AM_MODULATED,
+            ]:
+                # Для периодических сигналов - больше периодов
+                adaptive_min_periods = max(min_periods, 5)
+            elif entry.signal_type == SignalType.IMPULSE:
+                # Для импульсных - достаточно 3-4 периода
+                adaptive_min_periods = max(min_periods, 3)
+            else:
+                # Для остальных - стандартное значение
+                adaptive_min_periods = min_periods
+
+            effective_min = max(seg_min_duration, min_period * adaptive_min_periods)
+            effective_max = max(
+                seg_max_duration, effective_min * 1.5
+            )  # Увеличен диапазон
 
             if remaining_time < effective_min:
                 continue
@@ -334,9 +352,11 @@ def generate_segmented_signal(
 
             seg_duration = rng.uniform(actual_min, actual_max)
 
-            # НОВОЕ: округлить до кратного периоду
+            # Округлить до кратного периоду
             if min_period > 0:
-                num_periods = max(min_periods, int(np.round(seg_duration / min_period)))
+                num_periods = max(
+                    adaptive_min_periods, int(np.round(seg_duration / min_period))
+                )
                 seg_duration = num_periods * min_period
 
             seg_n = int(round(seg_duration / dt))
@@ -355,17 +375,17 @@ def generate_segmented_signal(
 
             seg_signal = _generate_segment_signal(entry, seg_n, dt)
 
-            # НОВОЕ: убрать зануление (плавное затухание на краях)
-            fade_len = max(1, min(seg_n // 20, int(0.01 / dt)))  # ~10мс
+            # Плавное затухание на краях
+            fade_len = max(1, min(seg_n // 20, int(0.01 / dt)))
             if seg_n > fade_len * 2:
                 fade_in = np.linspace(0, 1, fade_len)
                 fade_out = np.linspace(1, 0, fade_len)
                 seg_signal[:fade_len] *= fade_in
                 seg_signal[-fade_len:] *= fade_out
 
-            result[pos : pos + seg_n] = seg_signal  # ИЗМЕНЕНО: убрано +=
+            result[pos : pos + seg_n] = seg_signal
 
-            # НОВОЕ: цвет в зависимости от частоты для одного типа
+            # Цвет в зависимости от частоты для одного типа
             label_base = type_names.get(entry.signal_type, "?")
             if entry.signal_type == SignalType.HARMONIC:
                 label = f"{label_base}_{entry.freq:.1f}Гц"

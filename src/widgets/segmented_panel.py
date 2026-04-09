@@ -527,7 +527,7 @@ class SegmentedPanel(QGroupBox):
         row_periods.addWidget(QLabel("Мин. периодов в сегменте:"))
         self.spin_min_periods = QSpinBox()
         self.spin_min_periods.setRange(1, 100)
-        self.spin_min_periods.setValue(2)  # НОВОЕ: по умолчанию 2 периода
+        self.spin_min_periods.setValue(5)  # НОВОЕ: по умолчанию 2 периода
         row_periods.addWidget(self.spin_min_periods)
         seg_layout.addLayout(row_periods)
 

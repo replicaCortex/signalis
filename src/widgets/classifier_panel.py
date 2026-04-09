@@ -16,6 +16,7 @@ from PyQt5.QtWidgets import (
 )
 
 from app import SegmentPoolEntry
+from classifier import ClassificationMethod
 from dsp import SignalType
 
 SEGMENT_TYPE_NAMES = [
@@ -427,6 +428,72 @@ class ClassifierPanel(QGroupBox):
         settings_group = QGroupBox("Параметры окна")
         settings_layout = QVBoxLayout(settings_group)
 
+        row_method = QHBoxLayout()
+        row_method.addWidget(QLabel("Метод классификации:"))
+        self.combo_method = QComboBox()
+        self.combo_method.addItems(
+            [
+                "K-means кластеризация",
+                "K-ближайших соседей (KNN)",
+                "Евклидово расстояние",
+                "Корреляция признаков",
+                "Dynamic Time Warping (DTW)",
+            ]
+        )
+        self.combo_method.setToolTip(
+            "K-means: кластеризация в пространстве признаков\n"
+            "KNN: голосование K ближайших эталонов\n"
+            "Евклидово: расстояние до ближайшего эталона\n"
+            "Корреляция: схожесть векторов признаков\n"
+            "DTW: сравнение формы сигналов во времени"
+        )
+        self.combo_method.currentIndexChanged.connect(self._on_method_changed)
+        row_method.addWidget(self.combo_method)
+        settings_layout.addLayout(row_method)
+
+        # Размер окна
+        row_window = QHBoxLayout()
+        row_window.addWidget(QLabel("Размер окна, с:"))
+        self.spin_window_size = QDoubleSpinBox()
+        self.spin_window_size.setRange(0.01, 10.0)
+        self.spin_window_size.setValue(0.2)
+        self.spin_window_size.setDecimals(3)
+        self.spin_window_size.setSingleStep(0.05)
+        row_window.addWidget(self.spin_window_size)
+        settings_layout.addLayout(row_window)
+
+        # Перекрытие
+        row_overlap = QHBoxLayout()
+        row_overlap.addWidget(QLabel("Перекрытие, %:"))
+        self.spin_overlap = QSpinBox()
+        self.spin_overlap.setRange(0, 90)
+        self.spin_overlap.setValue(50)
+        self.spin_overlap.setSuffix("%")
+        row_overlap.addWidget(self.spin_overlap)
+        settings_layout.addLayout(row_overlap)
+
+        # Кластеры (для K-means)
+        row_clusters = QHBoxLayout()
+        self.lbl_clusters = QLabel("Число кластеров:")
+        row_clusters.addWidget(self.lbl_clusters)
+        self.spin_n_clusters = QSpinBox()
+        self.spin_n_clusters.setRange(2, 20)
+        self.spin_n_clusters.setValue(5)
+        row_clusters.addWidget(self.spin_n_clusters)
+        settings_layout.addLayout(row_clusters)
+
+        # K соседей (для KNN)
+        row_k = QHBoxLayout()
+        self.lbl_k_neighbors = QLabel("Число соседей K:")
+        row_k.addWidget(self.lbl_k_neighbors)
+        self.spin_k_neighbors = QSpinBox()
+        self.spin_k_neighbors.setRange(1, 20)
+        self.spin_k_neighbors.setValue(3)
+        row_k.addWidget(self.spin_k_neighbors)
+        settings_layout.addLayout(row_k)
+
+        main_layout.addWidget(settings_group)
+
         row_window = QHBoxLayout()
         row_window.addWidget(QLabel("Размер окна, с:"))
         self.spin_window_size = QDoubleSpinBox()
@@ -513,6 +580,24 @@ class ClassifierPanel(QGroupBox):
         self._references.append(ref)
         self._pool_layout.insertWidget(self._pool_layout.count() - 1, ref)
         return ref
+
+    def get_classification_method(self) -> ClassificationMethod:
+        return ClassificationMethod(self.combo_method.currentIndex())
+
+    def get_k_neighbors(self) -> int:
+        return self.spin_k_neighbors.value()
+
+    def _on_method_changed(self, index: int):
+        """Показывает/скрывает параметры в зависимости от метода."""
+        # K-means нужно число кластеров
+        is_kmeans = index == 0
+        self.lbl_clusters.setVisible(is_kmeans)
+        self.spin_n_clusters.setVisible(is_kmeans)
+
+        # KNN нужно число соседей
+        is_knn = index == 1
+        self.lbl_k_neighbors.setVisible(is_knn)
+        self.spin_k_neighbors.setVisible(is_knn)
 
     def _remove_reference(self, ref: ReferenceSignalWidget):
         if ref in self._references:

@@ -10,7 +10,7 @@ from app import (
     generate_segmented_signal,
     generate_single_type_signal,
 )
-from classifier import SignalClassifier, extract_features, segment_and_classify
+from classifier import ClassificationMethod, SignalClassifier, extract_features
 from widgets.classifier_panel import ClassifierPanel  # НОВОЕ
 from widgets.noise_filter_panel import NoiseFilterPanel
 from widgets.plot_panel import PlotPanel
@@ -131,7 +131,7 @@ class MainWindow(QMainWindow):
         self._refresh_plots()
 
     def _on_classify(self):
-        """НОВОЕ: Обучает классификатор и применяет к сигналу."""
+        """Обучает классификатор и применяет к сигналу."""
         if self.data.n == 0:
             self.classifier_panel.set_status(
                 "Сначала сгенерируйте сигнал!", is_error=True
@@ -159,22 +159,31 @@ class MainWindow(QMainWindow):
         # Генерируем эталонные сегменты
         features_list = []
         labels_list = []
+        signals_list = []  # НОВОЕ: для DTW
 
         for name, entry in references:
-            # Генерируем эталон
             seg_signal = _generate_segment_signal(entry, window_size, dt)
             features = extract_features(seg_signal, dt)
             features_list.append(features)
             labels_list.append(name)
+            signals_list.append(seg_signal)  # НОВОЕ
 
-        # Обучаем классификатор
+        # Обучаем классификатор с выбранным методом
+        method = self.classifier_panel.get_classification_method()
         n_clusters = min(self.classifier_panel.get_n_clusters(), len(references))
-        self.classifier = SignalClassifier(n_clusters=n_clusters, max_iter=100)
+        k_neighbors = self.classifier_panel.get_k_neighbors()
+
+        self.classifier = SignalClassifier(
+            method=method, n_clusters=n_clusters, max_iter=100, k_neighbors=k_neighbors
+        )
 
         try:
-            self.classifier.fit(features_list, labels_list)
+            self.classifier.fit(features_list, labels_list, signals_list)  # ОБНОВЛЕНО
         except Exception as e:
             self.classifier_panel.set_status(f"Ошибка обучения: {e}", is_error=True)
+            import traceback
+
+            traceback.print_exc()
             return
 
         # Применяем к текущему сигналу
@@ -190,28 +199,35 @@ class MainWindow(QMainWindow):
             end = start + window_size
             segment = self.data.combined[start:end]
 
-            # Извлечение признаков
             features = extract_features(segment, dt)
 
-            # Классификация
-            label, confidence = self.classifier.predict_with_confidence(features)
-
-            # ПРОВЕРКА: сумма вероятностей
-            total = sum(confidence.values())
-            if not np.isclose(total, 1.0):
-                print(f"ВНИМАНИЕ: сегмент {len(boundaries)}, сумма = {total:.6f}")
+            # ОБНОВЛЕНО: передаём сигнал для DTW
+            if method == ClassificationMethod.DTW:
+                label, confidence = self.classifier.predict_with_confidence(
+                    features, signal=segment
+                )
+            else:
+                label, confidence = self.classifier.predict_with_confidence(features)
 
             boundaries.append((start, end))
             labels.append(label)
             confidences.append(confidence)
 
-        # Сохраняем результаты
         self.data.classification_boundaries = boundaries
         self.data.classification_labels = labels
         self.data.classification_confidences = confidences
 
+        method_names = {
+            ClassificationMethod.KMEANS: "K-means",
+            ClassificationMethod.KNN: "KNN",
+            ClassificationMethod.EUCLIDEAN_DISTANCE: "Евклидово расстояние",
+            ClassificationMethod.CORRELATION: "Корреляция",
+            ClassificationMethod.DTW: "DTW",
+        }
+
         self.classifier_panel.set_status(
-            f"✓ Классификация завершена! Найдено {len(boundaries)} сегментов.",
+            f"✓ Классификация завершена ({method_names.get(method, 'неизвестно')})!\n"
+            f"Найдено {len(boundaries)} сегментов.",
             is_error=False,
         )
 
