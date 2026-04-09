@@ -91,6 +91,9 @@ class SignalData:
     colored_noise: np.ndarray = field(default_factory=lambda: np.zeros(0))
     combined: np.ndarray = field(default_factory=lambda: np.zeros(0))
     filtered: np.ndarray = field(default_factory=lambda: np.zeros(0))
+    classification_boundaries: list = field(default_factory=list)
+    classification_labels: list = field(default_factory=list)
+    classification_confidences: list = field(default_factory=list)
 
     spectrum_mag: np.ndarray = field(default_factory=lambda: np.zeros(0))
     spectrum_phase: np.ndarray = field(default_factory=lambda: np.zeros(0))

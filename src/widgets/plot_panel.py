@@ -130,6 +130,7 @@ class PlotPanel(QWidget):
         self.tabs = QTabWidget()
 
         self.tab_noise = PlotTab()
+        self.tab_confidence = ConfidencePlotTab()
         self.tab_signals = PlotTab()
         self.tab_spectrum = SpectrumTab()
         self.tab_phase_psd = PhasePsdTab()
@@ -142,6 +143,7 @@ class PlotPanel(QWidget):
         self.tabs.addTab(self.tab_acf, "АКФ")
         self.tabs.addTab(self.tab_freq_resp, "АЧХ фильтра")
         self.tabs.addTab(self.tab_noise, "Шум")
+        self.tabs.addTab(self.tab_confidence, "Классификация")
 
         layout.addWidget(self.tabs)
 
@@ -223,29 +225,33 @@ class PlotPanel(QWidget):
         self.tab_phase_psd.refresh()
 
     def _draw_segment_boundaries(self, ax, data, params, x_axis):
-        """Рисует границы сегментов. x_axis — массив значений оси X."""
+        """Рисует границы сегментов с уникальными цветами для каждого варианта."""
         if not data.segment_boundaries:
             return
 
         drawn_labels = set()
 
         import matplotlib.cm as cm
+        import matplotlib.colors as mcolors
 
-        unique_labels = list(set(data.segment_labels))
+        # Создаем уникальную цветовую палитру для всех вариантов
+        unique_labels = list(dict.fromkeys(data.segment_labels))  # сохраняем порядок
+        n_unique = len(unique_labels)
+
+        # Генерируем различимые цвета
+        if n_unique <= 10:
+            colormap = cm.get_cmap("tab10")
+        elif n_unique <= 20:
+            colormap = cm.get_cmap("tab20")
+        else:
+            colormap = cm.get_cmap("hsv")
+
         color_map = {}
-
         for i, label in enumerate(unique_labels):
-            base_type = label.split("_")[0]
-            if base_type in SEGMENT_COLORS:
-                base_color = SEGMENT_COLORS[base_type]
-                # Варьируем оттенок для разных частот
-                import matplotlib.colors as mcolors
-
-                rgb = mcolors.to_rgb(base_color)
-                hue_shift = (i % 5) * 0.05  # Небольшой сдвиг оттенка
-                color_map[label] = tuple(min(1.0, c + hue_shift) for c in rgb)
+            if n_unique <= 20:
+                color_map[label] = colormap(i)
             else:
-                color_map[label] = cm.tab20(i % 20)[:3]
+                color_map[label] = colormap(i / n_unique)
 
         for (start, end), label in zip(data.segment_boundaries, data.segment_labels):
             x_start = x_axis[start] if start < len(x_axis) else x_axis[-1]
@@ -256,13 +262,13 @@ class PlotPanel(QWidget):
             ax.axvspan(
                 x_start,
                 x_end,
-                alpha=0.12,
+                alpha=0.2,  # Увеличена прозрачность для лучшей видимости
                 color=color,
                 label=f"{label}" if show_label else None,
             )
             drawn_labels.add(label)
 
-            ax.axvline(x_start, color=color, linestyle="--", linewidth=0.5, alpha=0.5)
+            ax.axvline(x_start, color=color, linestyle="--", linewidth=0.8, alpha=0.6)
 
     def update_plots(
         self,
@@ -341,4 +347,158 @@ class PlotPanel(QWidget):
             ax_noise.set(xlabel=x_label, ylabel="Амплитуда")
             ax_noise.legend()
             ax_noise.grid(True)
-        self.tab_noise.refresh()
+
+        if data.classification_confidences:
+            self.tab_confidence.plot_confidence(
+                data.classification_boundaries,
+                data.classification_confidences,
+                x_axis,
+                params.dt,
+            )
+        else:
+            self.tab_confidence.clear()
+        self.tab_confidence.refresh()
+
+
+class ConfidencePlotTab(QWidget):
+    """Вкладка для отображения уверенности классификации."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.figure = Figure(tight_layout=True)
+        self.canvas = FigureCanvas(self.figure)
+        self.ax = self.figure.add_subplot(111)
+
+        layout = QVBoxLayout(self)
+
+        # Информация о формате
+        info_label = QLabel(
+            "График показывает уверенность классификатора для каждого сегмента.\n"
+            "Высота столбца = вероятность (от 0 до 1, т.е. 0% до 100%)."
+        )
+        info_label.setStyleSheet("color: #666; font-size: 9px; padding: 3px;")
+        info_label.setWordWrap(True)
+        layout.addWidget(info_label)
+
+        layout.addWidget(self.canvas)
+
+    def plot_confidence(self, boundaries, confidences, x_axis, dt):
+        """Рисует график уверенности классификации."""
+        self.ax.clear()
+
+        if not confidences:
+            self.ax.text(
+                0.5,
+                0.5,
+                "Нет данных классификации",
+                ha="center",
+                va="center",
+                transform=self.ax.transAxes,
+            )
+            self.canvas.draw()
+            return
+
+        # Собираем все уникальные метки
+        all_labels = set()
+        for conf_dict in confidences:
+            all_labels.update(conf_dict.keys())
+        all_labels = sorted(all_labels)
+
+        # Создаем цветовую карту
+        import matplotlib.cm as cm
+
+        n_labels = len(all_labels)
+        if n_labels <= 10:
+            colormap = cm.get_cmap("tab10")
+        elif n_labels <= 20:
+            colormap = cm.get_cmap("tab20")
+        else:
+            colormap = cm.get_cmap("hsv")
+
+        colors = {}
+        for i, label in enumerate(all_labels):
+            if n_labels <= 20:
+                colors[label] = colormap(i)
+            else:
+                colors[label] = colormap(i / n_labels)
+
+        # Для каждого сегмента рисуем столбчатую диаграмму уверенности
+        n_segments = len(boundaries)
+
+        for i, ((start, end), conf_dict) in enumerate(zip(boundaries, confidences)):
+            center = (start + end) // 2
+            time_center = center * dt
+
+            # ПРОВЕРКА: сумма вероятностей должна быть 1.0
+            total_prob = sum(conf_dict.values())
+            if not np.isclose(total_prob, 1.0):
+                print(f"ВНИМАНИЕ: сегмент {i}, сумма вероятностей = {total_prob:.4f}")
+
+            # Накопленная высота для stacked bar
+            bottom = 0.0
+            for label in all_labels:
+                prob = conf_dict.get(label, 0.0)
+                if prob > 0.001:  # Показываем только значимые вероятности (>0.1%)
+                    width = dt * (end - start) * 0.8
+                    self.ax.bar(
+                        time_center,
+                        prob,
+                        bottom=bottom,
+                        color=colors[label],
+                        width=width,
+                        label=label if i == 0 else "",
+                        alpha=0.8,
+                        edgecolor="white",
+                        linewidth=0.5,
+                    )
+
+                    # Добавляем текст с процентами для значимых вероятностей (>10%)
+                    if prob > 0.1:
+                        text_y = bottom + prob / 2
+                        self.ax.text(
+                            time_center,
+                            text_y,
+                            f"{prob * 100:.0f}%",
+                            ha="center",
+                            va="center",
+                            fontsize=7,
+                            color="white" if prob > 0.3 else "black",
+                            weight="bold",
+                        )
+
+                    bottom += prob
+
+        self.ax.set_xlabel("Время, с")
+        self.ax.set_ylabel("Вероятность")
+        self.ax.set_title("Уверенность классификации по сегментам")
+        self.ax.set_ylim(0, 1.0)  # ИСПРАВЛЕНО: максимум 1.0
+
+        # Добавляем горизонтальные линии для удобства чтения
+        for y in [0.25, 0.5, 0.75, 1.0]:
+            self.ax.axhline(y, color="gray", linestyle=":", linewidth=0.5, alpha=0.5)
+
+        # Форматируем ось Y в процентах
+        from matplotlib.ticker import FuncFormatter
+
+        self.ax.yaxis.set_major_formatter(FuncFormatter(lambda y, _: f"{y * 100:.0f}%"))
+
+        self.ax.grid(True, alpha=0.3, axis="x")
+
+        # Легенда без дубликатов
+        handles, labels = self.ax.get_legend_handles_labels()
+        by_label = dict(zip(labels, handles))
+        self.ax.legend(
+            by_label.values(),
+            by_label.keys(),
+            loc="upper right",
+            fontsize=8,
+            framealpha=0.9,
+        )
+
+        self.canvas.draw()
+
+    def clear(self):
+        self.ax.clear()
+
+    def refresh(self):
+        self.canvas.draw()

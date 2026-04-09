@@ -1,3 +1,4 @@
+import numpy as np
 from PyQt5.QtWidgets import QHBoxLayout, QMainWindow, QTabWidget, QWidget
 
 from app import (
@@ -9,6 +10,8 @@ from app import (
     generate_segmented_signal,
     generate_single_type_signal,
 )
+from classifier import SignalClassifier, extract_features, segment_and_classify
+from widgets.classifier_panel import ClassifierPanel  # НОВОЕ
 from widgets.noise_filter_panel import NoiseFilterPanel
 from widgets.plot_panel import PlotPanel
 from widgets.segmented_panel import SEGMENT_TYPE_NAMES, SegmentedPanel
@@ -24,6 +27,7 @@ class MainWindow(QMainWindow):
 
         self.data = SignalData()
         self.params = SignalParams()
+        self.classifier = None  # НОВОЕ
 
         self._build_ui()
         self._connect_signals()
@@ -38,11 +42,13 @@ class MainWindow(QMainWindow):
 
         self.segmented_panel = SegmentedPanel()
         self.noise_filter_panel = NoiseFilterPanel()
+        self.classifier_panel = ClassifierPanel()  # НОВОЕ
         self.statistics_panel = StatisticsPanel()
         self.theory_panel = TheoryPanel()
 
         self.left_tabs.addTab(self.segmented_panel, "Сигнал")
         self.left_tabs.addTab(self.noise_filter_panel, "Шумы и фильтры")
+        self.left_tabs.addTab(self.classifier_panel, "Классификация")  # НОВОЕ
         self.left_tabs.addTab(self.statistics_panel, "Характеристики")
         self.left_tabs.addTab(self.theory_panel, "Теория")
 
@@ -60,6 +66,9 @@ class MainWindow(QMainWindow):
 
         # Панель сигнала
         self.segmented_panel.generate_requested.connect(self._on_generate)
+
+        # НОВОЕ: Панель классификации
+        self.classifier_panel.classify_requested.connect(self._on_classify)
 
         # Панель характеристик — экспорт WAV
         self.statistics_panel.export_wav_requested.connect(self._on_export_wav)
@@ -111,8 +120,100 @@ class MainWindow(QMainWindow):
                 seg_min_duration=sp.get_seg_min_duration(),
                 seg_max_duration=sp.get_seg_max_duration(),
                 colored_noise_entries=colored_entries,
-                min_periods=sp.get_min_periods(),  # НОВОЕ
+                min_periods=sp.get_min_periods(),
             )
+
+        # Сбросить данные классификации при новой генерации
+        self.data.classification_boundaries = []
+        self.data.classification_labels = []
+        self.data.classification_confidences = []
+
+        self._refresh_plots()
+
+    def _on_classify(self):
+        """НОВОЕ: Обучает классификатор и применяет к сигналу."""
+        if self.data.n == 0:
+            self.classifier_panel.set_status(
+                "Сначала сгенерируйте сигнал!", is_error=True
+            )
+            return
+
+        references = self.classifier_panel.get_references()
+
+        if len(references) < 2:
+            self.classifier_panel.set_status(
+                "Добавьте минимум 2 эталонных сигнала!", is_error=True
+            )
+            return
+
+        from app import _generate_segment_signal
+
+        dt = self.params.dt
+        window_size_sec = self.classifier_panel.get_window_size()
+        window_size = int(window_size_sec / dt)
+
+        if window_size < 10:
+            self.classifier_panel.set_status("Размер окна слишком мал!", is_error=True)
+            return
+
+        # Генерируем эталонные сегменты
+        features_list = []
+        labels_list = []
+
+        for name, entry in references:
+            # Генерируем эталон
+            seg_signal = _generate_segment_signal(entry, window_size, dt)
+            features = extract_features(seg_signal, dt)
+            features_list.append(features)
+            labels_list.append(name)
+
+        # Обучаем классификатор
+        n_clusters = min(self.classifier_panel.get_n_clusters(), len(references))
+        self.classifier = SignalClassifier(n_clusters=n_clusters, max_iter=100)
+
+        try:
+            self.classifier.fit(features_list, labels_list)
+        except Exception as e:
+            self.classifier_panel.set_status(f"Ошибка обучения: {e}", is_error=True)
+            return
+
+        # Применяем к текущему сигналу
+        overlap_percent = self.classifier_panel.get_overlap_percent()
+        step = max(1, int(window_size * (1 - overlap_percent / 100)))
+
+        boundaries = []
+        labels = []
+        confidences = []
+
+        n = self.data.n
+        for start in range(0, n - window_size + 1, step):
+            end = start + window_size
+            segment = self.data.combined[start:end]
+
+            # Извлечение признаков
+            features = extract_features(segment, dt)
+
+            # Классификация
+            label, confidence = self.classifier.predict_with_confidence(features)
+
+            # ПРОВЕРКА: сумма вероятностей
+            total = sum(confidence.values())
+            if not np.isclose(total, 1.0):
+                print(f"ВНИМАНИЕ: сегмент {len(boundaries)}, сумма = {total:.6f}")
+
+            boundaries.append((start, end))
+            labels.append(label)
+            confidences.append(confidence)
+
+        # Сохраняем результаты
+        self.data.classification_boundaries = boundaries
+        self.data.classification_labels = labels
+        self.data.classification_confidences = confidences
+
+        self.classifier_panel.set_status(
+            f"✓ Классификация завершена! Найдено {len(boundaries)} сегментов.",
+            is_error=False,
+        )
 
         self._refresh_plots()
 
