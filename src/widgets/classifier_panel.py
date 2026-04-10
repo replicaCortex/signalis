@@ -62,13 +62,13 @@ class ReferenceSignalWidget(QGroupBox):
         layout.addWidget(self.cb_enabled)
 
         # Название эталона
-        row_name = QHBoxLayout()
-        row_name.addWidget(QLabel("Название:"))
-        self.ed_name = QLineEdit()
-        self.ed_name.setPlaceholderText("Например: Гарм_5Гц")
-        self.ed_name.textChanged.connect(self._update_title)
-        row_name.addWidget(self.ed_name)
-        layout.addLayout(row_name)
+        # row_name = QHBoxLayout()
+        # row_name.addWidget(QLabel("Название:"))
+        # self.ed_name = QLineEdit()
+        # self.ed_name.setPlaceholderText("Например: Гарм_5Гц")
+        # self.ed_name.textChanged.connect(self._update_title)
+        # row_name.addWidget(self.ed_name)
+        # layout.addLayout(row_name)
 
         # Тип сигнала
         row_type = QHBoxLayout()
@@ -334,28 +334,50 @@ class ReferenceSignalWidget(QGroupBox):
 
     def get_name(self) -> str:
         """Возвращает название эталона."""
-        name = self.ed_name.text().strip()
-        if not name:
-            # Генерируем автоматическое название
-            idx = self.combo_type.currentIndex()
-            sig_type = SEGMENT_TYPE_MAP.get(idx, SignalType.HARMONIC)
+        # Генерируем автоматическое название
+        idx = self.combo_type.currentIndex()
+        sig_type = SEGMENT_TYPE_MAP.get(idx, SignalType.HARMONIC)
 
-            if sig_type == SignalType.HARMONIC:
-                name = f"Гарм_{self.spin_freq.value():.1f}Гц"
-            elif sig_type == SignalType.SAWTOOTH:
-                name = f"Пила_{self.spin_saw_freq.value():.1f}Гц"
-            elif sig_type == SignalType.AM_MODULATED:
-                name = f"АМ_{self.spin_am_carrier_freq.value():.0f}/{self.spin_am_mod_freq.value():.1f}Гц"
-            else:
-                type_names = {
-                    SignalType.GAUSSIAN: "Гаусс",
-                    SignalType.IMPULSE: "Импульс",
-                    SignalType.EXPONENTIAL_IMPULSE: "Эксп",
-                    SignalType.SPEECH: "Речь",
-                }
-                name = type_names.get(sig_type, "Сигнал")
+        if sig_type == SignalType.HARMONIC:
+            name = f"Гарм_{self.spin_freq.value():.1f}Гц"
+        elif sig_type == SignalType.SAWTOOTH:
+            name = f"Пила_{self.spin_saw_freq.value():.1f}Гц"
+        elif sig_type == SignalType.AM_MODULATED:
+            name = f"АМ_{self.spin_am_carrier_freq.value():.0f}/{self.spin_am_mod_freq.value():.1f}Гц"
+        else:
+            type_names = {
+                SignalType.GAUSSIAN: "Гаусс",
+                SignalType.IMPULSE: "Импульс",
+                SignalType.EXPONENTIAL_IMPULSE: "Эксп",
+                SignalType.SPEECH: "Речь",
+            }
+            name = type_names.get(sig_type, "Сигнал")
 
         return name
+
+    def _update_title(self):
+        """Обновляет заголовок группы."""
+        # Просто обновляем заголовок с индексом
+        self.setTitle(f"Эталон #{self._index + 1}")
+
+    def _on_type_changed(self, index: int):
+        """Показываем/скрываем группы параметров."""
+        sig_type = SEGMENT_TYPE_MAP.get(index, SignalType.HARMONIC)
+
+        self.harmonic_group.setVisible(sig_type == SignalType.HARMONIC)
+        self.sawtooth_group.setVisible(sig_type == SignalType.SAWTOOTH)
+        self.gauss_group.setVisible(sig_type == SignalType.GAUSSIAN)
+        self.impulse_group.setVisible(sig_type == SignalType.IMPULSE)
+        self.exp_group.setVisible(sig_type == SignalType.EXPONENTIAL_IMPULSE)
+        self.speech_group.setVisible(sig_type == SignalType.SPEECH)
+        self.am_group.setVisible(sig_type == SignalType.AM_MODULATED)
+
+        self._update_title()  # Обновляем заголовок при смене типа
+        self.changed.emit()
+
+    def set_index(self, idx: int):
+        self._index = idx
+        self._update_title()
 
     def to_entry(self) -> SegmentPoolEntry:
         """Преобразует виджет в SegmentPoolEntry."""
@@ -414,16 +436,6 @@ class ClassifierPanel(QGroupBox):
     def _build_ui(self):
         main_layout = QVBoxLayout(self)
 
-        # Описание
-        desc = QLabel(
-            "Добавьте эталонные сигналы для обучения классификатора.\n"
-            "После нажатия 'Определить сигнал' система автоматически\n"
-            "разметит текущий сигнал на сегменты и покажет уверенность."
-        )
-        desc.setStyleSheet("color: #555; font-size: 10px; padding: 5px;")
-        desc.setWordWrap(True)
-        main_layout.addWidget(desc)
-
         # Настройки окна классификации
         settings_group = QGroupBox("Параметры окна")
         settings_layout = QVBoxLayout(settings_group)
@@ -459,6 +471,7 @@ class ClassifierPanel(QGroupBox):
         self.spin_window_size.setValue(0.2)
         self.spin_window_size.setDecimals(3)
         self.spin_window_size.setSingleStep(0.05)
+        self.spin_window_size.setToolTip("Размер скользящего окна для анализа")
         row_window.addWidget(self.spin_window_size)
         settings_layout.addLayout(row_window)
 
@@ -469,6 +482,7 @@ class ClassifierPanel(QGroupBox):
         self.spin_overlap.setRange(0, 90)
         self.spin_overlap.setValue(50)
         self.spin_overlap.setSuffix("%")
+        self.spin_overlap.setToolTip("Процент перекрытия окон")
         row_overlap.addWidget(self.spin_overlap)
         settings_layout.addLayout(row_overlap)
 
@@ -479,6 +493,7 @@ class ClassifierPanel(QGroupBox):
         self.spin_n_clusters = QSpinBox()
         self.spin_n_clusters.setRange(2, 20)
         self.spin_n_clusters.setValue(5)
+        self.spin_n_clusters.setToolTip("Количество кластеров для K-means")
         row_clusters.addWidget(self.spin_n_clusters)
         settings_layout.addLayout(row_clusters)
 
@@ -489,40 +504,9 @@ class ClassifierPanel(QGroupBox):
         self.spin_k_neighbors = QSpinBox()
         self.spin_k_neighbors.setRange(1, 20)
         self.spin_k_neighbors.setValue(3)
+        self.spin_k_neighbors.setToolTip("Количество соседей для KNN")
         row_k.addWidget(self.spin_k_neighbors)
         settings_layout.addLayout(row_k)
-
-        main_layout.addWidget(settings_group)
-
-        row_window = QHBoxLayout()
-        row_window.addWidget(QLabel("Размер окна, с:"))
-        self.spin_window_size = QDoubleSpinBox()
-        self.spin_window_size.setRange(0.01, 10.0)
-        self.spin_window_size.setValue(0.2)
-        self.spin_window_size.setDecimals(3)
-        self.spin_window_size.setSingleStep(0.05)
-        self.spin_window_size.setToolTip("Размер скользящего окна для анализа")
-        row_window.addWidget(self.spin_window_size)
-        settings_layout.addLayout(row_window)
-
-        row_overlap = QHBoxLayout()
-        row_overlap.addWidget(QLabel("Перекрытие, %:"))
-        self.spin_overlap = QSpinBox()
-        self.spin_overlap.setRange(0, 90)
-        self.spin_overlap.setValue(50)
-        self.spin_overlap.setSuffix("%")
-        self.spin_overlap.setToolTip("Процент перекрытия окон")
-        row_overlap.addWidget(self.spin_overlap)
-        settings_layout.addLayout(row_overlap)
-
-        row_clusters = QHBoxLayout()
-        row_clusters.addWidget(QLabel("Число кластеров:"))
-        self.spin_n_clusters = QSpinBox()
-        self.spin_n_clusters.setRange(2, 20)
-        self.spin_n_clusters.setValue(5)
-        self.spin_n_clusters.setToolTip("Количество кластеров для K-means")
-        row_clusters.addWidget(self.spin_n_clusters)
-        settings_layout.addLayout(row_clusters)
 
         main_layout.addWidget(settings_group)
 
@@ -614,7 +598,10 @@ class ClassifierPanel(QGroupBox):
 
     def _add_all_types(self):
         for i in range(len(SEGMENT_TYPE_NAMES)):
-            self._add_reference(type_idx=i)
+            # Проверяем, что это не речевой сигнал
+            sig_type = SEGMENT_TYPE_MAP.get(i)
+            if sig_type != SignalType.SPEECH:
+                self._add_reference(type_idx=i)
 
     def _reindex(self):
         for i, ref in enumerate(self._references):

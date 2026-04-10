@@ -85,4 +85,15 @@ def compute_frequency_response(
     den_cos = 1 + b1 * np.cos(w1) + b2 * np.cos(w2)
     den_sin = b1 * np.sin(w1) + b2 * np.sin(w2)
 
-    return np.sqrt((num_cos**2 + num_sin**2) / (den_cos**2 + den_sin**2))
+    # Добавляем защиту от деления на ноль
+    denominator = den_cos**2 + den_sin**2
+    denominator = np.where(denominator == 0, 1e-10, denominator)
+
+    response = np.sqrt((num_cos**2 + num_sin**2) / denominator)
+
+    # Нормализуем АЧХ
+    max_response = np.max(response)
+    if max_response > 0:
+        response = response / max_response
+
+    return response

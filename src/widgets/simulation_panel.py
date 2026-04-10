@@ -2,10 +2,7 @@ from PyQt5.QtCore import pyqtSignal
 from PyQt5.QtWidgets import (
     QDoubleSpinBox,
     QFormLayout,
-    QGroupBox,
     QLabel,
-    QLineEdit,
-    QSpinBox,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -30,32 +27,22 @@ class CollapsibleSimulationWidget(QWidget):
         self._toggle_btn.setText("Параметры симуляции")
         self._toggle_btn.setCheckable(True)
         self._toggle_btn.setChecked(False)
-        self._toggle_btn.setStyleSheet(
-            "QToolButton {"
-            "  font-weight: bold; font-size: 12px;"
-            "  border: 1px solid #ccc; border-radius: 3px;"
-            "  padding: 4px 8px; background: #f5f5f5;"
-            "  text-align: left;"
-            "}"
-            "QToolButton:checked { background: #e0e0e0; }"
-            "QToolButton:hover   { background: #e8e8e8; }"
-        )
-        self._toggle_btn.setToolButtonStyle(2)  # Qt.ToolButtonTextOnly workaround
-        self._toggle_btn.setSizePolicy(
-            self._toggle_btn.sizePolicy().horizontalPolicy(),
-            self._toggle_btn.sizePolicy().verticalPolicy(),
-        )
+        self._toggle_btn.setToolButtonStyle(2)  # Qt.ToolButtonTextOnly
         self._toggle_btn.toggled.connect(self._on_toggle)
         outer_layout.addWidget(self._toggle_btn)
 
         self._content = QWidget()
+        self._content.setObjectName("simulationContent")
+        # Убираем явный фон, делаем прозрачным
+        self._content.setStyleSheet("background-color: transparent;")
+
         form = QFormLayout(self._content)
         form.setContentsMargins(6, 4, 6, 4)
         form.setSpacing(4)
 
         self.spin_T = QDoubleSpinBox()
         self.spin_T.setRange(0.001, 100000.0)
-        self.spin_T.setValue(1.0)
+        self.spin_T.setValue(5.0)
         self.spin_T.setDecimals(4)
         self.spin_T.setSingleStep(0.1)
         self.spin_T.setSuffix(" с")
@@ -71,12 +58,10 @@ class CollapsibleSimulationWidget(QWidget):
         self.spin_fd.valueChanged.connect(self._update_derived)
         form.addRow("Частота Fd:", self.spin_fd)
 
-        self.lbl_dt = QLabel("0.010000 с")
-        self.lbl_dt.setStyleSheet("color: #555; background: #f0f0f0; padding: 2px 4px;")
+        self.lbl_dt = QLabel("0.01с")
         form.addRow("Шаг ΔT:", self.lbl_dt)
 
         self.lbl_N = QLabel("100")
-        self.lbl_N.setStyleSheet("color: #555; background: #f0f0f0; padding: 2px 4px;")
         form.addRow("Точек N:", self.lbl_N)
 
         self._content.setVisible(False)

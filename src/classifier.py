@@ -155,7 +155,12 @@ class SignalClassifier:
             distances = np.array(
                 [min(np.linalg.norm(x - c) ** 2 for c in centroids) for x in X_norm]
             )
-            probs = distances / distances.sum()
+            dist_sum = distances.sum()
+            if dist_sum > 0 and np.isfinite(dist_sum):
+                probs = distances / dist_sum
+            else:
+                # Все точки уже покрыты центроидами — равномерное распределение
+                probs = np.ones(n_samples) / n_samples
             idx = rng.choice(n_samples, p=probs)
             centroids.append(X_norm[idx])
 
@@ -222,11 +227,19 @@ class SignalClassifier:
         """Классификация методом K-means."""
         distances = np.array([np.linalg.norm(x_norm - c) for c in self.centroids])
 
+        # Softmax с отрицательными расстояниями (численно стабильный)
         temperature = 1.0
         neg_distances = -distances / temperature
+        # Численно стабильный softmax: вычитаем максимум
         neg_distances_shifted = neg_distances - np.max(neg_distances)
         exp_neg_dist = np.exp(neg_distances_shifted)
-        probabilities = exp_neg_dist / np.sum(exp_neg_dist)
+        sum_exp = np.sum(exp_neg_dist)
+
+        if sum_exp <= 0 or not np.isfinite(sum_exp):
+            # Fallback: равномерное распределение
+            probabilities = np.ones(len(distances)) / len(distances)
+        else:
+            probabilities = exp_neg_dist / sum_exp
 
         confidence_dict = {}
         for cluster_id, prob in enumerate(probabilities):
@@ -234,7 +247,7 @@ class SignalClassifier:
             confidence_dict[label] = confidence_dict.get(label, 0.0) + prob
 
         total_prob = sum(confidence_dict.values())
-        if not np.isclose(total_prob, 1.0):
+        if total_prob > 0 and not np.isclose(total_prob, 1.0):
             confidence_dict = {k: v / total_prob for k, v in confidence_dict.items()}
 
         predicted_label = max(confidence_dict.items(), key=lambda x: x[1])[0]
@@ -261,11 +274,17 @@ class SignalClassifier:
             dist = distances[idx]
             weight = 1.0 / (dist + 1e-10)  # Избегаем деления на 0
 
+            if not np.isfinite(weight):
+                weight = 1e10  # Большой вес для очень близких соседей
+
             votes[label] = votes.get(label, 0.0) + weight
             total_weight += weight
 
         # Нормализуем в вероятности
-        confidence_dict = {label: vote / total_weight for label, vote in votes.items()}
+        if total_weight > 0:
+            confidence_dict = {label: vote / total_weight for label, vote in votes.items()}
+        else:
+            confidence_dict = {label: 1.0 / len(votes) for label in votes}
 
         predicted_label = max(confidence_dict.items(), key=lambda x: x[1])[0]
         return predicted_label, confidence_dict
@@ -277,12 +296,17 @@ class SignalClassifier:
 
         distances = np.array([np.linalg.norm(x_norm - r) for r in ref_norm])
 
-        # Softmax на основе отрицательных расстояний
-        temperature = 0.5  # Более уверенные предсказания
+        # Численно стабильный softmax
+        temperature = 0.5
         neg_distances = -distances / temperature
         neg_distances_shifted = neg_distances - np.max(neg_distances)
         exp_neg_dist = np.exp(neg_distances_shifted)
-        probabilities = exp_neg_dist / np.sum(exp_neg_dist)
+        sum_exp = np.sum(exp_neg_dist)
+
+        if sum_exp <= 0 or not np.isfinite(sum_exp):
+            probabilities = np.ones(len(distances)) / len(distances)
+        else:
+            probabilities = exp_neg_dist / sum_exp
 
         # Группируем по меткам
         confidence_dict = {}
@@ -291,7 +315,8 @@ class SignalClassifier:
 
         # Нормализуем
         total = sum(confidence_dict.values())
-        confidence_dict = {k: v / total for k, v in confidence_dict.items()}
+        if total > 0:
+            confidence_dict = {k: v / total for k, v in confidence_dict.items()}
 
         predicted_label = max(confidence_dict.items(), key=lambda x: x[1])[0]
         return predicted_label, confidence_dict
@@ -321,16 +346,20 @@ class SignalClassifier:
             correlations.append(corr)
 
         # Преобразуем корреляции в вероятности
-        # Корреляция от -1 до 1, приводим к 0..1
         correlations = np.array(correlations)
         correlations_pos = (correlations + 1.0) / 2.0  # 0..1
 
-        # Softmax
+        # Численно стабильный softmax
         temperature = 0.3
         scaled = correlations_pos / temperature
         scaled_shifted = scaled - np.max(scaled)
         exp_corr = np.exp(scaled_shifted)
-        probabilities = exp_corr / np.sum(exp_corr)
+        sum_exp = np.sum(exp_corr)
+
+        if sum_exp <= 0 or not np.isfinite(sum_exp):
+            probabilities = np.ones(len(correlations)) / len(correlations)
+        else:
+            probabilities = exp_corr / sum_exp
 
         # Группируем по меткам
         confidence_dict = {}
@@ -338,7 +367,8 @@ class SignalClassifier:
             confidence_dict[label] = confidence_dict.get(label, 0.0) + prob
 
         total = sum(confidence_dict.values())
-        confidence_dict = {k: v / total for k, v in confidence_dict.items()}
+        if total > 0:
+            confidence_dict = {k: v / total for k, v in confidence_dict.items()}
 
         predicted_label = max(confidence_dict.items(), key=lambda x: x[1])[0]
         return predicted_label, confidence_dict
@@ -384,19 +414,26 @@ class SignalClassifier:
 
         distances = np.array(distances)
 
-        # Softmax
-        temperature = np.mean(distances) if np.mean(distances) > 0 else 1.0
+        # Численно стабильный softmax
+        mean_dist = np.mean(distances)
+        temperature = mean_dist if mean_dist > 0 else 1.0
         neg_distances = -distances / temperature
         neg_distances_shifted = neg_distances - np.max(neg_distances)
         exp_neg_dist = np.exp(neg_distances_shifted)
-        probabilities = exp_neg_dist / np.sum(exp_neg_dist)
+        sum_exp = np.sum(exp_neg_dist)
+
+        if sum_exp <= 0 or not np.isfinite(sum_exp):
+            probabilities = np.ones(len(distances)) / len(distances)
+        else:
+            probabilities = exp_neg_dist / sum_exp
 
         confidence_dict = {}
         for label, prob in zip(self.reference_labels, probabilities):
             confidence_dict[label] = confidence_dict.get(label, 0.0) + prob
 
         total = sum(confidence_dict.values())
-        confidence_dict = {k: v / total for k, v in confidence_dict.items()}
+        if total > 0:
+            confidence_dict = {k: v / total for k, v in confidence_dict.items()}
 
         predicted_label = max(confidence_dict.items(), key=lambda x: x[1])[0]
         return predicted_label, confidence_dict

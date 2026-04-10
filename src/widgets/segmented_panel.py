@@ -25,7 +25,7 @@ SEGMENT_TYPE_NAMES = [
     "Пилообразный",
     "Импульсный",
     "Экспоненциальный",
-    "Речевой сигнал",
+    # "Речевой сигнал",
     "Амплитудная модуляция",
 ]
 
@@ -35,7 +35,7 @@ SEGMENT_TYPE_MAP = {
     2: SignalType.SAWTOOTH,
     3: SignalType.IMPULSE,
     4: SignalType.EXPONENTIAL_IMPULSE,
-    5: SignalType.SPEECH,
+    # 5: SignalType.SPEECH,
     6: SignalType.AM_MODULATED,
 }
 
@@ -343,9 +343,9 @@ class SegmentEntryWidget(QGroupBox):
         layout.addWidget(self.am_group)
 
         # Метка минимальной длительности
-        self.lbl_min_duration = QLabel("Мин. длительность: —")
-        self.lbl_min_duration.setStyleSheet("color: #666; font-style: italic;")
-        layout.addWidget(self.lbl_min_duration)
+        # self.lbl_min_duration = QLabel("Мин. длительность: —")
+        # self.lbl_min_duration.setStyleSheet("color: #666; font-style: italic;")
+        # layout.addWidget(self.lbl_min_duration)
 
         # Кнопка удаления
         self.btn_remove = QPushButton("Удалить")
@@ -353,30 +353,30 @@ class SegmentEntryWidget(QGroupBox):
         layout.addWidget(self.btn_remove)
 
         # Обновляем мин. длительность при изменении параметров
-        for spin in [
-            self.spin_freq,
-            self.spin_amp,
-            self.spin_phase,
-            self.spin_saw_freq,
-            self.spin_saw_amp,
-            self.spin_saw_phase,
-            self.spin_gauss_center,
-            self.spin_gauss_amp,
-            self.spin_gauss_sigma,
-            self.spin_imp_width,
-            self.spin_imp_amp,
-            self.spin_imp_period,
-            self.spin_imp_delay,
-            self.spin_exp_alpha,
-            self.spin_exp_amp,
-            self.spin_exp_delay,
-            self.spin_speech_amp,
-            self.spin_am_carrier_freq,  # НОВОЕ
-            self.spin_am_carrier_amp,
-            self.spin_am_mod_freq,
-            self.spin_am_mod_depth,
-        ]:
-            spin.valueChanged.connect(self._update_min_duration_label)
+        # for spin in [
+        #     self.spin_freq,
+        #     self.spin_amp,
+        #     self.spin_phase,
+        #     self.spin_saw_freq,
+        #     self.spin_saw_amp,
+        #     self.spin_saw_phase,
+        #     self.spin_gauss_center,
+        #     self.spin_gauss_amp,
+        #     self.spin_gauss_sigma,
+        #     self.spin_imp_width,
+        #     self.spin_imp_amp,
+        #     self.spin_imp_period,
+        #     self.spin_imp_delay,
+        #     self.spin_exp_alpha,
+        #     self.spin_exp_amp,
+        #     self.spin_exp_delay,
+        #     self.spin_speech_amp,
+        #     self.spin_am_carrier_freq,  # НОВОЕ
+        #     self.spin_am_carrier_amp,
+        #     self.spin_am_mod_freq,
+        #     self.spin_am_mod_depth,
+        # ]:
+        # spin.valueChanged.connect(self._update_min_duration_label)
 
     def _browse_wav(self):
         """Открывает диалог выбора WAV файла."""
@@ -423,7 +423,7 @@ class SegmentEntryWidget(QGroupBox):
     def _update_min_duration_label(self):
         entry = self.to_entry()
         min_dur = entry.min_duration_for_one_period()
-        self.lbl_min_duration.setText(f"Мин. длительность (1 период): {min_dur:.4f} с")
+        # self.lbl_min_duration.setText(f"Мин. длительность (1 период): {min_dur:.4f} с")
 
     def to_entry(self) -> SegmentPoolEntry:
         idx = self.combo_type.currentIndex()
@@ -478,6 +478,15 @@ class SegmentedPanel(QGroupBox):
         super().__init__("Сигнал", parent)
         self._entries: list[SegmentEntryWidget] = []
         self._build_ui()
+        self._setup_defaults()
+
+    def _setup_defaults(self):
+        """Устанавливает значения по умолчанию при старте."""
+        # Включаем режим "Заполнить одним типом сигнала"
+        self.cb_single_type.setChecked(True)
+
+        # Добавляем один гармонический сигнал по умолчанию
+        self._add_entry(type_idx=0)  # 0 = Гармонический
 
     def _build_ui(self):
         main_layout = QVBoxLayout(self)

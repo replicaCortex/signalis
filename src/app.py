@@ -661,9 +661,13 @@ def apply_filter_to_data(
     r = filter_params.r
     fc = filter_params.cutoff
 
+    # Применяем фильтр к комбинированному сигналу
     data.filtered = apply_filter(data.combined, ft, r, fc, sample_rate)
+
+    # Вычисляем АЧХ фильтра
     data.freq_response = compute_frequency_response(ft, r, fc, sample_rate, n)
 
+    # Вычисляем спектр отфильтрованного сигнала
     _, _, mag, _ = compute_dft(data.filtered)
     if noise_enabled:
         mag = mag**2 / n

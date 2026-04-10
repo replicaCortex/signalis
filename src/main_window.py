@@ -11,6 +11,7 @@ from app import (
     generate_single_type_signal,
 )
 from classifier import ClassificationMethod, SignalClassifier, extract_features
+from theme import get_qss_theme
 from widgets.classifier_panel import ClassifierPanel  # НОВОЕ
 from widgets.noise_filter_panel import NoiseFilterPanel
 from widgets.plot_panel import PlotPanel
@@ -29,8 +30,13 @@ class MainWindow(QMainWindow):
         self.params = SignalParams()
         self.classifier = None  # НОВОЕ
 
+        self._apply_dark_theme()
         self._build_ui()
         self._connect_signals()
+
+    def _apply_dark_theme(self):
+        """Применяет тёмную тему Catppuccin Mocha ко всему приложению."""
+        self.setStyleSheet(get_qss_theme())
 
     def _build_ui(self):
         central = QWidget()
@@ -76,7 +82,6 @@ class MainWindow(QMainWindow):
         # Чекбоксы отображения
         for cb in [
             self.plot_panel.cb_base,
-            self.plot_panel.cb_noise,
             self.plot_panel.cb_colored_noise,
             self.plot_panel.cb_combined,
             self.plot_panel.cb_filtered,
@@ -129,6 +134,17 @@ class MainWindow(QMainWindow):
         self.data.classification_confidences = []
 
         self._refresh_plots()
+
+        # НОВОЕ: переключаемся на вкладку "Сигналы" в правой панели
+        self._switch_to_signals_tab()
+
+    def _switch_to_signals_tab(self):
+        """Переключает правую панель на вкладку 'Сигналы'."""
+        tabs = self.plot_panel.tabs
+        for i in range(tabs.count()):
+            if tabs.tabText(i) == "Сигналы":
+                tabs.setCurrentIndex(i)
+                break
 
     def _on_classify(self):
         """Обучает классификатор и применяет к сигналу."""
@@ -232,6 +248,16 @@ class MainWindow(QMainWindow):
         )
 
         self._refresh_plots()
+
+        self._switch_to_classification_tab()
+
+    def _switch_to_classification_tab(self):
+        """Переключает правую панель на вкладку 'Классификация'."""
+        tabs = self.plot_panel.tabs
+        for i in range(tabs.count()):
+            if tabs.tabText(i) == "Классификация":
+                tabs.setCurrentIndex(i)
+                break
 
     def _on_filter(self):
         if self.data.n == 0:
