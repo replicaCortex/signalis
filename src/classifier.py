@@ -282,7 +282,9 @@ class SignalClassifier:
 
         # Нормализуем в вероятности
         if total_weight > 0:
-            confidence_dict = {label: vote / total_weight for label, vote in votes.items()}
+            confidence_dict = {
+                label: vote / total_weight for label, vote in votes.items()
+            }
         else:
             confidence_dict = {label: 1.0 / len(votes) for label in votes}
 
